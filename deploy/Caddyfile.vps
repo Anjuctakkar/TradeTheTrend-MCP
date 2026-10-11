@@ -1,0 +1,6 @@
+# Replace app.yourdomain.com with your address, then:
+#   sudo cp deploy/Caddyfile.vps /etc/caddy/Caddyfile && sudo systemctl reload caddy
+app.yourdomain.com {
+	encode gzip zstd
+	reverse_proxy 127.0.0.1:8000
+}

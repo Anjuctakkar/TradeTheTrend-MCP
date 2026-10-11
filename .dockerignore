@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.production.example
+!.env.local.example
+.venv
+__pycache__
+*.pyc
+*.zip
+*.db
+data
+backups
+.git
+tests

@@ -1,0 +1,1393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NSE MCP Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0d131a;
+    --side: #111a23;
+    --panel: #151f2a;
+    --field: #0b1118;
+    --border: #233242;
+    --text: #e4ebf2;
+    --muted: #8596a6;
+    --accent: #3fb984;   /* gains / long */
+    --accent2: #5b8def;  /* primary actions */
+    --danger: #ef5a5a;
+    --warn: #e8b84b;
+    --topbar-h: 52px;
+    --side-w: 340px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; font-family: "Segoe UI", -apple-system, Roboto, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; font-variant-numeric: tabular-nums; }
+  :focus-visible { outline: 2px solid var(--accent2); outline-offset: 2px; }
+
+  /* ---- top bar ---- */
+  .topbar { height: var(--topbar-h); display: flex; align-items: center; gap: 28px; padding: 0 20px; background: var(--side); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10; }
+  .brand { font-size: 15px; font-weight: 650; white-space: nowrap; }
+  .brand small { color: var(--muted); font-weight: 400; margin-left: 8px; font-size: 12px; }
+  .tabs { display: flex; gap: 2px; height: 100%; flex: 1; }
+  .tab { display: flex; align-items: center; padding: 0 14px; cursor: pointer; color: var(--muted); font-size: 13.5px; border-bottom: 2px solid transparent; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent2); }
+
+  /* ---- shell: sidebar + main ---- */
+  .view { display: none; }
+  .view.active { display: block; }
+  .layout { display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr); min-height: calc(100vh - var(--topbar-h)); }
+  .sidebar { background: var(--side); border-right: 1px solid var(--border); padding: 4px 0 28px; position: sticky; top: var(--topbar-h); align-self: start; height: calc(100vh - var(--topbar-h)); overflow-y: auto; }
+  .side-section { padding: 16px 20px; border-bottom: 1px solid var(--border); }
+  .side-section:last-child { border-bottom: none; }
+  .main { padding: 20px 28px 60px; min-width: 0; }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--border); }
+    .main { padding: 16px; }
+    .topbar { gap: 12px; padding: 0 12px; overflow-x: auto; }
+    .brand small { display: none; }
+  }
+
+  h2 { font-size: 13px; font-weight: 650; color: var(--text); margin: 0 0 10px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 18px; }
+  .panel h2 { color: var(--muted); }
+
+  /* ---- form controls ---- */
+  select, textarea, input[type=text], input[type=number], input[type=password], button {
+    width: 100%; background: var(--field); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 8px 10px; font-size: 13px; font-family: inherit;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent2); outline: none; }
+  textarea { min-height: 110px; resize: vertical; font-family: ui-monospace, Consolas, monospace; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4px; }
+  label:first-of-type { margin-top: 0; }
+  #anMaxWrap label { margin-top: 12px; }
+  .tool-desc { font-size: 12px; color: var(--muted); margin-top: 6px; line-height: 1.45; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; line-height: 1.45; }
+
+  button.primary { margin-top: 14px; background: var(--accent2); border-color: var(--accent2); color: #fff; font-weight: 600; cursor: pointer; padding: 9px 10px; }
+  button.primary:hover { filter: brightness(1.08); }
+  button.primary:disabled { opacity: .5; cursor: not-allowed; }
+  button.secondary { background: transparent; border: 1px dashed var(--border); color: var(--muted); cursor: pointer; margin-top: 4px; }
+  button.secondary:hover { color: var(--text); border-color: var(--muted); }
+
+  .status { font-size: 12px; margin-top: 10px; color: var(--muted); line-height: 1.4; }
+  .status.error { color: var(--danger); }
+
+  /* ---- tables / output ---- */
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
+  td:not(:first-child), th:not(:first-child) { text-align: right; }
+  tr:hover td { background: rgba(255,255,255,0.025); }
+  pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; background: var(--field); padding: 12px; border-radius: 6px; border: 1px solid var(--border); max-height: 65vh; overflow: auto; }
+  .result-scroll { max-height: 65vh; overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
+  .empty { color: var(--muted); font-size: 13px; padding: 48px 20px; text-align: center; line-height: 1.6; }
+
+  /* ---- stock input rows (sidebar) ---- */
+  .stock-row { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; align-items: center; }
+  .stock-row .evalchk { display: flex; align-items: center; gap: 4px; margin: 0; font-size: 12px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+  .stock-row .evalchk input { width: auto; margin: 0; }
+  .stock-row .evalchk:has(input:checked) { color: var(--accent2); }
+  .stock-row button { width: auto; padding: 8px 10px; background: transparent; border: 1px solid var(--border); color: var(--muted); cursor: pointer; }
+  .stock-row button:hover { color: var(--danger); border-color: var(--danger); }
+  .stock-wrap { margin-bottom: 8px; }
+  .match-line { font-size: 12px; min-height: 16px; color: var(--muted); padding: 3px 2px 0; line-height: 1.4; }
+  .match-ok { color: var(--accent); font-weight: 600; }
+  .match-err { color: var(--danger); }
+  .match-meta { color: var(--muted); }
+  .match-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+  .match-chip { width: auto !important; padding: 3px 9px !important; font-size: 12px; background: var(--field) !important; border: 1px solid var(--border) !important; color: var(--text) !important; border-radius: 999px !important; cursor: pointer; }
+  .match-chip:hover { border-color: var(--accent2) !important; }
+
+  /* ---- results ---- */
+  .summary-cards { display: flex; flex-wrap: wrap; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 18px; }
+  .summary-card { padding: 14px 22px; flex: 1 1 150px; border-right: 1px solid var(--border); }
+  .summary-card:last-child { border-right: none; }
+  .summary-card .label { font-size: 12px; color: var(--muted); }
+  .summary-card .value { font-size: 20px; font-weight: 600; margin-top: 2px; }
+
+  .stock-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 18px; margin-bottom: 18px; }
+  .stock-card h3 { margin: 0 0 4px; font-size: 17px; }
+  .stock-card .meta { font-size: 12.5px; color: var(--muted); margin-bottom: 12px; line-height: 1.5; }
+  .chart-wrap { position: relative; height: 280px; margin-bottom: 10px; }
+  .chart-wrap.small { height: 140px; }
+
+  .signal-box { border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; margin-bottom: 14px; }
+  .signal-box.long { border-color: var(--accent); background: rgba(63,185,132,0.07); }
+  .signal-box.no-trade { background: rgba(133,150,166,0.05); }
+  .signal-badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 4px; margin-right: 8px; }
+  .signal-badge.long { background: var(--accent); color: #06251a; }
+  .signal-badge.no-trade { background: var(--border); color: var(--muted); }
+  .signal-figures { display: flex; gap: 22px; flex-wrap: wrap; margin: 10px 0 8px; }
+  .signal-figures .label { font-size: 12px; color: var(--muted); }
+  .signal-figures .value { font-size: 15px; font-weight: 600; }
+  .signal-reasons { margin: 6px 0 0; padding-left: 18px; font-size: 12px; color: var(--muted); line-height: 1.6; }
+
+  .pos { color: var(--accent); } .neg { color: var(--danger); } .warn { color: var(--warn); }
+  .badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 4px; background: var(--border); color: var(--muted); }
+  .badge.target { background: rgba(63,185,132,.18); color: var(--accent); }
+  .badge.stopped { background: rgba(239,90,90,.18); color: var(--danger); }
+  .badge.expired { background: rgba(232,184,75,.15); color: var(--warn); }
+  .badge.open, .badge.pending { background: rgba(91,141,239,.18); color: var(--accent2); }
+  .caveat { font-size: 12px; color: var(--muted); line-height: 1.55; margin: 0 0 18px; max-width: 90ch; }
+  details.trades { margin-top: 10px; } details.trades summary { cursor: pointer; color: var(--muted); font-size: 13px; padding: 4px 0; }
+  td input[type=checkbox] { width: auto; }
+  td button.rm { width: auto; padding: 2px 8px; background: transparent; color: var(--muted); cursor: pointer; }
+  td button.rm:hover { color: var(--danger); border-color: var(--danger); }
+  button.linkish { margin-top: 10px; background: transparent; border: 1px solid var(--border); color: var(--text); cursor: pointer; }
+  button.linkish:hover { border-color: var(--accent2); }
+  .holdgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+  @media (max-width: 1100px) { .holdgrid { grid-template-columns: 1fr; } }
+  .holdbox { border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; }
+  .holdbox h4 { margin: 0 0 10px; font-size: 13px; font-weight: 650; color: var(--muted); }
+  .holdnum { font-size: 17px; font-weight: 650; } .holdnum.none { color: var(--muted); font-size: 15px; }
+  .rangebar-track { position: relative; height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--danger), var(--warn), var(--accent)); opacity: .85; margin: 8px 0 6px; }
+  .rangebar-dot { position: absolute; top: -4px; width: 14px; height: 14px; margin-left: -7px; border-radius: 50%; background: var(--text); border: 2px solid var(--bg); }
+  .rangebar-ends { display: flex; justify-content: space-between; font-size: 12.5px; font-weight: 600; line-height: 1.35; }
+  .rangebar-ends small { font-weight: 400; color: var(--muted); }
+  .side-section .hint + label { margin-top: 12px; }
+  #view-settings .panel label { margin-top: 12px; }
+  #view-settings .grid-2 { margin-top: 12px; }
+  #view-settings .grid-2 label { margin-top: 0; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 1000px) { .grid-2 { grid-template-columns: 1fr; } }
+  a.addwatch { color: var(--text); text-decoration: none; border-bottom: 1px dotted var(--muted); }
+  a.addwatch:hover { color: var(--accent2); }
+  .btnrow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+  .btnrow button { width: auto; margin-top: 0; padding: 8px 14px; }
+  .keystatus { margin: 12px 0 4px; font-size: 13px; }
+  .keystatus code { background: var(--field); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; }
+  .result-msg { margin-top: 12px; padding: 10px 12px; border-radius: 6px; font-size: 13px; line-height: 1.5; border: 1px solid var(--border); }
+  .result-msg.ok { border-color: var(--accent); background: rgba(63,185,132,.08); }
+  .result-msg.bad { border-color: var(--danger); background: rgba(239,90,90,.08); }
+  .result-msg a { color: var(--accent2); }
+  table.compact { font-size: 12.5px; }
+  table.compact th, table.compact td { padding: 4px 8px; text-align: left; }
+  table.compact td.r, table.compact th.r { text-align: right; }
+  table.compact td.lv { color: var(--muted); font-size: 12px; }
+  table.compact input[type=checkbox] { width: auto; margin: 0; }
+  .summary-cards.compact .summary-card { padding: 8px 14px; flex: 1 1 110px; }
+  .summary-cards.compact .summary-card .value { font-size: 16px; }
+  .chips { display: flex; gap: 6px; margin: 0 0 8px; flex-wrap: wrap; align-items: center; }
+  .chipbtn { width: auto; padding: 3px 10px; font-size: 12px; border-radius: 999px; background: transparent; color: var(--muted); cursor: pointer; }
+  .chipbtn.on { color: var(--text); border-color: var(--accent2); background: rgba(91,141,239,.14); }
+  .badge.src-user { background: rgba(91,141,239,.18); color: var(--accent2); }
+  .badge.src-system { background: rgba(133,150,166,.16); color: var(--muted); }
+  .badge.no_setup, .badge.no_data { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+  details.stockdet { border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; margin-bottom: 8px; background: var(--panel); }
+  details.stockdet summary { cursor: pointer; font-size: 13px; padding: 2px 0; }
+  details.stockdet[open] summary { margin-bottom: 8px; }
+  .chart-wrap.mid { height: 220px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">NSE MCP Dashboard<small>Bhavcopy and CM market data</small></div>
+  <nav class="tabs">
+    <div class="tab active" data-view="analysis">Portfolio analysis</div>
+    <div class="tab" data-view="eval">Evaluation</div>
+    <div class="tab" data-view="live">Live</div>
+    <div class="tab" data-view="bhavcopy">Bhavcopy (EOD)</div>
+    <div class="tab" data-view="cm">CM market data</div>
+    <div class="tab" data-view="settings" style="margin-left:auto">&#9881; Settings</div>
+  </nav>
+  <button type="button" class="chipbtn" id="logoutBtn" style="display:none">Log out</button>
+</div>
+
+<section class="view" id="view-bhavcopy"></section>
+<section class="view" id="view-cm"></section>
+
+<section class="view" id="view-eval">
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="side-section">
+        <h2>Backtest</h2>
+        <div class="hint" style="margin-top:0">Tick stocks in the list, then run. Stocks you ticked <b>Eval</b> on in Portfolio analysis are already ticked.</div>
+        <label for="btMonths">History</label>
+        <select id="btMonths"><option value="12">12 months</option><option value="18">18 months</option><option value="24">24 months</option><option value="6">6 months</option></select>
+        <label for="btHold">Maximum holding period (trading days)</label>
+        <input type="number" id="btHold" value="20" min="2" max="120" />
+        <label for="btCost">Round-trip cost (%)</label>
+        <input type="number" id="btCost" value="0.2" min="0" max="5" step="0.05" />
+        <button class="primary" id="btRun">Backtest selected (0)</button>
+        <div class="status" id="btStatus"></div>
+      </div>
+      <div class="side-section">
+        <h2>Outcomes</h2>
+        <div class="hint" style="margin-top:0">Checks whether each stock hit its target, hit its stop, or is still open. Needs live NSE data, so it only runs when you ask.</div>
+        <button class="primary" id="trRefresh">Refresh outcomes</button>
+        <div class="status" id="trStatus"></div>
+      </div>
+    </aside>
+    <div class="main">
+      <div id="trResults"><div class="empty">Loading…</div></div>
+      <div id="btResults"></div>
+    </div>
+  </div>
+</section>
+
+<section class="view" id="view-live">
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="side-section">
+        <h2>Stocks to watch</h2>
+        <label for="liveSymbols">NSE symbols (comma separated)</label>
+        <input type="text" id="liveSymbols" placeholder="e.g. TCS, INFY, RELIANCE" autocomplete="off" spellcheck="false" />
+        <div class="btnrow" style="margin-top:8px">
+          <button class="secondary" id="liveFromPortfolio" type="button">Use my portfolio stocks</button>
+          <button class="secondary" id="liveFromEval" type="button">Use Evaluation list</button>
+        </div>
+        <div class="hint">Up to 20. Your list is remembered in this browser.</div>
+      </div>
+      <div class="side-section">
+        <h2>Top movers</h2>
+        <label class="evalchk" style="display:flex;align-items:center;gap:6px;margin:0;color:var(--text);font-size:13px"><input type="checkbox" id="moversOn" checked style="width:auto;margin:0"> Show top gainers and losers</label>
+        <label for="moversIndex">Index</label>
+        <select id="moversIndex"><option value="">All securities</option><option value="NIFTY">NIFTY 50</option><option value="BANKNIFTY">BANKNIFTY</option><option value="NIFTYNEXT50">NIFTY Next 50</option></select>
+        <label for="moversLimit">How many each</label>
+        <select id="moversLimit"><option>5</option><option selected>10</option><option>20</option></select>
+        <div class="hint">Refreshes with the watch list below. Click a stock to add it to your list.</div>
+      </div>
+      <div class="side-section">
+        <h2>Refresh</h2>
+        <label for="liveEvery">Update every</label>
+        <select id="liveEvery"><option value="30">30 seconds</option><option value="60" selected>1 minute</option><option value="120">2 minutes</option><option value="300">5 minutes</option><option value="0">Off (manual)</option></select>
+        <div class="hint">The source refreshes quotes about once a minute, so updating faster than 30 seconds adds nothing. Updates pause while this tab isn't showing.</div>
+        <button class="primary" id="liveNow">Refresh now</button>
+        <div class="status" id="liveStatus"></div>
+      </div>
+    </aside>
+    <div class="main">
+      <div id="liveBar"></div>
+      <div id="liveMovers"></div>
+      <div id="liveTable"><div class="empty">Add stock symbols in the sidebar and click Refresh now.<br>Prices come from the CM market data server and are shown next to the last end-of-day close.</div></div>
+      <div id="liveRaw"></div>
+    </div>
+  </div>
+</section>
+
+<section class="view" id="view-settings">
+  <div class="main" style="max-width:780px">
+    <div class="panel" id="adminKeyPanel">
+      <h2>Anthropic API key</h2>
+      <div class="hint" style="margin-top:0">The chat assistant uses this key to call Claude. The rest of the dashboard doesn't need it. It is saved in the <code>.env</code> file on this computer and is never shown again in full.</div>
+      <div class="keystatus" id="stKeyStatus">Loading…</div>
+      <label for="stKey">New API key</label>
+      <input type="password" id="stKey" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
+      <div class="hint">Leave this blank to keep the current key.</div>
+      <label for="stModel">Model</label>
+      <input type="text" id="stModel" list="stModels" placeholder="claude-sonnet-5-5" autocomplete="off" spellcheck="false" />
+      <datalist id="stModels"><option value="claude-sonnet-5-5"></option><option value="claude-opus-5-5"></option><option value="claude-haiku-4-5-20251001"></option></datalist>
+      <div class="btnrow">
+        <button class="primary" id="stSave">Save and test</button>
+        <button class="secondary" id="stTest">Test current key</button>
+        <button class="secondary" id="stRemove">Remove key</button>
+      </div>
+      <div id="stResult"></div>
+    </div>
+    <div class="panel">
+      <h2>Funding rules (MTF, interest, charges)</h2>
+      <div class="hint" style="margin-top:0">Used by Portfolio analysis when you choose "Own capital + MTF", and for charges and net P/L. Saved to your account, so they follow you to any device. Brokerage, DP and pledge values start as placeholders: enter your broker's.</div>
+      <div class="grid-2">
+        <div><label for="fr_default_leverage">Default leverage (x)</label><input type="number" id="fr_default_leverage" step="0.1" min="1" max="4" /><div class="hint" id="frMarginHint"></div></div>
+        <div><label for="fr_interest_pct">MTF interest (% a year)</label><input type="number" id="fr_interest_pct" step="0.1" min="0" /></div>
+        <div><label for="fr_day_count">Interest day count</label><select id="fr_day_count"><option value="365">365</option><option value="360">360</option></select></div>
+        <div><label for="fr_assumed_hold_days">Assumed hold if none proposed (trading days)</label><input type="number" id="fr_assumed_hold_days" min="1" max="120" /></div>
+      </div>
+      <label for="fr_stocks">Per-stock margin list (optional)</label>
+      <textarea id="fr_stocks" style="min-height:130px" placeholder="HDFCBANK 3x&#10;TCS 25%&#10;RELIANCE 2.5&#10;ITC none" spellcheck="false"></textarea>
+      <div class="hint">One stock per line: <code>SYMBOL 3x</code> (leverage), <code>SYMBOL 25%</code> (own margin) or <code>SYMBOL none</code> (not on MTF). Stocks not listed use the default leverage. Leverage is limited to 1x to 4x (minimum own margin 25%). Lines starting with # are notes.</div>
+      <details class="trades" style="margin-top:10px"><summary>Charges</summary>
+        <div class="grid-2">
+          <div><label for="fr_brokerage_pct">Brokerage (% of value, per leg)</label><input type="number" id="fr_brokerage_pct" step="0.01" min="0" /></div>
+          <div><label for="fr_brokerage_cap">Brokerage cap (₹ per leg, 0 = none)</label><input type="number" id="fr_brokerage_cap" step="1" min="0" /></div>
+          <div><label for="fr_brokerage_min">Brokerage minimum (₹ per leg)</label><input type="number" id="fr_brokerage_min" step="1" min="0" /></div>
+          <div><label for="fr_dp_charge">DP charge (₹ per sell)</label><input type="number" id="fr_dp_charge" step="0.01" min="0" /></div>
+          <div><label for="fr_pledge_fee">MTF pledge fee (₹ per buy)</label><input type="number" id="fr_pledge_fee" step="0.01" min="0" /></div>
+          <div><label for="fr_unpledge_fee">MTF unpledge fee (₹ per sell)</label><input type="number" id="fr_unpledge_fee" step="0.01" min="0" /></div>
+          <div><label for="fr_stt_pct">STT (% each leg, delivery)</label><input type="number" id="fr_stt_pct" step="0.001" min="0" /></div>
+          <div><label for="fr_exchange_pct">Exchange charge (% each leg)</label><input type="number" id="fr_exchange_pct" step="0.00001" min="0" /></div>
+          <div><label for="fr_sebi_per_crore">SEBI fee (₹ per crore)</label><input type="number" id="fr_sebi_per_crore" step="0.1" min="0" /></div>
+          <div><label for="fr_stamp_buy_pct">Stamp duty (% on buy)</label><input type="number" id="fr_stamp_buy_pct" step="0.001" min="0" /></div>
+          <div><label for="fr_gst_pct">GST (%)</label><input type="number" id="fr_gst_pct" step="0.1" min="0" /></div>
+        </div>
+        <div class="hint">GST applies to brokerage, exchange, SEBI, DP and pledge fees, not to STT or stamp duty. Statutory rates are pre-filled from current NSE delivery rates and can change.</div>
+      </details>
+      <div class="btnrow"><button class="primary" id="frSave">Save funding rules</button><button class="secondary" id="frReset">Reset to defaults</button></div>
+      <div id="frResult"></div>
+    </div>
+    <div class="panel">
+      <h2>NSE connection</h2>
+      <div class="hint" style="margin-top:0">Checks that both NSE MCP servers answer and how fast. If a server is slow or down, analysis, backtests and the assistant's lookups will time out, whatever is set up on this side.</div>
+      <div class="btnrow"><button class="primary" id="nseTest">Test NSE connection</button></div>
+      <div id="nseResult"></div>
+      <div class="hint">The app waits up to 60 seconds per request and tries twice. Change this with <code>NSE_READ_TIMEOUT</code>, <code>NSE_RETRIES</code> and <code>NSE_MAX_INFLIGHT</code> in your <code>.env</code> file, then restart.</div>
+    </div>
+    <div class="panel" id="adminKeyHelp">
+      <h2>Getting a key</h2>
+      <ul class="signal-reasons" style="font-size:13px;margin:0">
+        <li>Create a key in the <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style="color:var(--accent2)">Anthropic Console, API keys</a>, and copy it when it is shown. It isn't shown again.</li>
+        <li>The key needs credit to work. Add some under <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener" style="color:var(--accent2)">Plans &amp; Billing</a>. "Credit balance is too low" means there is none left.</li>
+        <li>If a link has moved, look for API keys or Plans &amp; Billing in the Console's Settings menu.</li>
+        <li>This page only works from the computer running the dashboard. Don't share the key or put it in website code.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="view active" id="view-analysis">
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="side-section">
+        <h2>Capital</h2>
+        <label for="anTotalCapital">Own capital (₹)</label>
+        <input type="number" id="anTotalCapital" placeholder="e.g. 500000" min="0" value="500000" />
+        <label for="anFunding">Funding</label>
+        <select id="anFunding">
+          <option value="own">Own capital only</option>
+          <option value="mtf">Own capital + MTF</option>
+        </select>
+        <div id="anMtfWrap" style="display:none">
+          <label for="anMtfLimit">MTF limit (₹, optional)</label>
+          <input type="number" id="anMtfLimit" min="0" placeholder="No limit" />
+          <div class="hint" id="anMtfHint"></div>
+        </div>
+        <label for="anAllocMode">How to split it</label>
+        <select id="anAllocMode">
+          <option value="equal">Equal split</option>
+          <option value="suggested">Suggested by the app</option>
+        </select>
+        <div id="anMaxWrap" style="display:none">
+          <label for="anMaxWeight">Maximum per stock (%)</label>
+          <input type="number" id="anMaxWeight" value="35" min="5" max="100" step="5" />
+        </div>
+        <div class="hint" id="anSplitHint"></div>
+      </div>
+      <div class="side-section">
+        <h2>Stocks</h2>
+        <div class="hint" style="margin:-4px 0 10px">Tick <b>Eval</b> on a stock to follow it in Backtest and Evaluation. It is added when you run the analysis.</div>
+        <div id="stockRows"></div>
+        <button class="secondary" id="addStockBtn">+ Add stock</button>
+        <button class="primary" id="analyzeBtn">Run analysis</button>
+        <div class="status" id="anStatus"></div>
+      </div>
+      <div id="recSlot"></div>
+    </aside>
+    <div class="main">
+      <div id="recResults"></div>
+      <div id="anResults"><div class="empty">Add your stocks in the sidebar and run the analysis.<br>Charts, signals and quantities will appear here.</div></div>
+    </div>
+  </div>
+</section>
+
+<script>
+/* ---------- sign-in: send people back to the login page when the session ends ---------- */
+(() => {
+  const _fetch = window.fetch.bind(window);
+  window.fetch = async (...a) => {
+    const r = await _fetch(...a);
+    if (r.status === 401) { try { const j = await r.clone().json(); if (j.code === "auth") location.href = "/login?next=" + encodeURIComponent(location.pathname); } catch (e) {} }
+    return r;
+  };
+  _fetch("/api/auth/status").then(r => r.ok ? r.json() : null).then(d => {
+    if (!d || !d.auth_enabled) return;
+    if (d.user && d.user.role !== "admin") ['adminKeyPanel', 'adminKeyHelp'].forEach(id => { const p = document.getElementById(id); if (p) p.style.display = 'none'; });
+    const b = document.getElementById("logoutBtn"); b.style.display = "inline-block";
+    b.addEventListener("click", async () => { await _fetch("/api/logout", { method: "POST" }); location.href = "/login"; });
+  }).catch(() => {});
+})();
+
+/* ---------- shared helpers ---------- */
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+/* ---------- tab switching ---------- */
+document.querySelectorAll(".tab").forEach(tab => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
+    tab.classList.add("active");
+    document.getElementById("view-" + tab.dataset.view).classList.add("active");
+  });
+});
+
+/* ================= Explorer (bhavcopy / cm) ================= */
+window.toolsByServer = {};
+
+function buildExplorer(server) {
+  const root = document.getElementById("view-" + server);
+  root.innerHTML = `
+    <div class="layout">
+      <aside class="sidebar"><div class="side-section">
+        <h2>Tool</h2>
+        <label>Available tools</label>
+        <select class="toolSelect"><option>Loading…</option></select>
+        <div class="tool-desc toolDesc"></div>
+        <button type="button" class="secondary toggleSchema" style="width:auto; margin-top:6px; padding:4px 8px; font-size:11px;">Show input schema</button>
+        <pre class="schemaBox" style="display:none; margin-top:8px;"></pre>
+        <label>Arguments (JSON)</label>
+        <textarea class="argsBox">{}</textarea>
+        <button class="primary callBtn">Run</button>
+        <div class="status statusLine"></div>
+      </div></aside>
+      <div class="main"><div class="panel">
+        <h2>Result</h2>
+        <div class="resultArea"><div class="empty">Choose a tool and arguments in the sidebar, then click Run.</div></div>
+      </div></div>
+    </div>`;
+
+  const toolSelect = root.querySelector(".toolSelect");
+  const toolDesc = root.querySelector(".toolDesc");
+  const schemaBox = root.querySelector(".schemaBox");
+  const toggleSchema = root.querySelector(".toggleSchema");
+  const argsBox = root.querySelector(".argsBox");
+  const statusLine = root.querySelector(".statusLine");
+  const resultArea = root.querySelector(".resultArea");
+  const callBtn = root.querySelector(".callBtn");
+
+  let tools = [];
+
+  toggleSchema.addEventListener("click", () => {
+    const showing = schemaBox.style.display !== "none";
+    schemaBox.style.display = showing ? "none" : "block";
+    toggleSchema.textContent = showing ? "Show input schema" : "Hide input schema";
+  });
+
+  function updateToolDesc() {
+    const tool = tools.find(t => t.name === toolSelect.value);
+    if (tool) {
+      toolDesc.textContent = tool.description || "(no description provided)";
+      schemaBox.textContent = JSON.stringify(tool.input_schema || {}, null, 2);
+      schemaBox.style.display = "none";
+      toggleSchema.textContent = "Show input schema";
+      const props = tool.input_schema && tool.input_schema.properties;
+      if (props) {
+        const sample = {};
+        for (const [key, propSchema] of Object.entries(props)) {
+          const t = propSchema && propSchema.type;
+          if (t === "integer" || t === "number") sample[key] = 0;
+          else if (t === "boolean") sample[key] = false;
+          else if (t === "array") sample[key] = [];
+          else if (t === "object") sample[key] = {};
+          else sample[key] = "";
+        }
+        argsBox.value = JSON.stringify(sample, null, 2);
+      } else {
+        argsBox.value = "{}";
+      }
+    }
+  }
+  toolSelect.addEventListener("change", updateToolDesc);
+
+  async function loadTools() {
+    toolSelect.innerHTML = "<option>Loading…</option>";
+    statusLine.textContent = "";
+    statusLine.className = "status statusLine";
+    try {
+      const res = await fetch(`/api/tools?server=${encodeURIComponent(server)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || res.statusText);
+      tools = data.tools;
+      window.toolsByServer[server] = tools;
+      if (!tools.length) { toolSelect.innerHTML = "<option>No tools found</option>"; return; }
+      toolSelect.innerHTML = tools.map(t => `<option value="${t.name}">${t.name}</option>`).join("");
+      updateToolDesc();
+      statusLine.textContent = `Connected — ${tools.length} tool(s) at ${data.url}`;
+      document.dispatchEvent(new CustomEvent("mcp-tools-loaded", { detail: { server, tools } }));
+    } catch (e) {
+      toolSelect.innerHTML = "<option>—</option>";
+      statusLine.textContent = "Connection failed: " + e.message;
+      statusLine.className = "status statusLine error";
+    }
+  }
+
+  callBtn.addEventListener("click", async () => {
+    const tool = toolSelect.value;
+    if (!tool || tool === "—" || tool === "Loading…") return;
+    let args;
+    try { args = JSON.parse(argsBox.value || "{}"); }
+    catch (e) { statusLine.textContent = "Arguments must be valid JSON"; statusLine.className = "status statusLine error"; return; }
+
+    callBtn.disabled = true;
+    statusLine.textContent = "Running…";
+    statusLine.className = "status statusLine";
+    resultArea.innerHTML = '<div class="empty">Running…</div>';
+    try {
+      const res = await fetch("/api/call", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ server, tool, arguments: args }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || res.statusText);
+      renderExplorerResult(resultArea, data.content);
+      statusLine.textContent = data.note || (data.is_error ? "Tool reported an error" : "Done");
+      statusLine.className = data.is_error ? "status statusLine error" : "status statusLine";
+    } catch (e) {
+      resultArea.innerHTML = '<div class="empty">No result</div>';
+      statusLine.textContent = "Call failed: " + e.message;
+      statusLine.className = "status statusLine error";
+    } finally { callBtn.disabled = false; }
+  });
+
+  loadTools();
+}
+
+function renderExplorerResult(resultArea, content) {
+  if (Array.isArray(content) && content.length && content.every(row => row && typeof row === "object" && !Array.isArray(row))) {
+    const cols = [...new Set(content.flatMap(row => Object.keys(row)))];
+    const thead = `<tr>${cols.map(c => `<th>${c}</th>`).join("")}</tr>`;
+    const rows = content.map(row => `<tr>${cols.map(c => `<td>${row[c] ?? ""}</td>`).join("")}</tr>`).join("");
+    resultArea.innerHTML = `<div class="result-scroll"><table><thead>${thead}</thead><tbody>${rows}</tbody></table></div>`;
+  } else {
+    resultArea.innerHTML = `<pre>${escapeHtml(JSON.stringify(content, null, 2))}</pre>`;
+  }
+}
+
+buildExplorer("bhavcopy");
+buildExplorer("cm");
+
+/* ================= Portfolio Analysis ================= */
+const anTotalCapital = document.getElementById("anTotalCapital");
+const anSplitHint = document.getElementById("anSplitHint");
+const stockRows = document.getElementById("stockRows");
+const addStockBtn = document.getElementById("addStockBtn");
+const analyzeBtn = document.getElementById("analyzeBtn");
+const anStatus = document.getElementById("anStatus");
+const anResults = document.getElementById("anResults");
+
+const chartInstances = [];
+
+function currentStockCount() {
+  return [...stockRows.querySelectorAll(".stockSymbol")].filter(i => i.value.trim()).length;
+}
+
+function updateSplitHint() {
+  const total = parseFloat(anTotalCapital.value) || 0;
+  const n = currentStockCount();
+  const suggested = document.getElementById("anAllocMode").value === "suggested";
+  document.getElementById("anMaxWrap").style.display = suggested ? "block" : "none";
+  if (!n) { anSplitHint.textContent = suggested ? "Add stocks below. The app sets each weight after it analyses them." : "Add stocks below — capital splits equally across them."; return; }
+  if (suggested) { anSplitHint.textContent = `The app puts capital only into your stocks with a LONG setup, giving calmer stocks more, within the cap. Stocks with No trade get nothing. Weights appear after the analysis.`; return; }
+  if (document.getElementById("anFunding").value === "mtf") { anSplitHint.textContent = `Each stock's share is applied to the total position, which is larger than your own capital because part is funded by MTF. The funding table after the analysis shows your own money and the funded part.`; return; }
+  const each = total / n;
+  anSplitHint.textContent = `Splits equally across ${n} stock${n > 1 ? "s" : ""}: ₹${each.toLocaleString("en-IN", { maximumFractionDigits: 0 })} each.`;
+}
+document.getElementById("anAllocMode").addEventListener("change", updateSplitHint);
+let fundingInfo = null;
+fetch("/api/funding/rules").then(r => r.ok ? r.json() : null).then(d => { fundingInfo = d; updateMtfHint(); }).catch(() => {});
+function updateMtfHint() {
+  const mtf = document.getElementById("anFunding").value === "mtf";
+  document.getElementById("anMtfWrap").style.display = mtf ? "block" : "none";
+  const r = fundingInfo && fundingInfo.rules;
+  document.getElementById("anMtfHint").textContent = r
+    ? `Default ${r.default_leverage}x leverage (${(100 / r.default_leverage).toFixed(1)}% own money), ${r.interest_pct}% a year on the funded part. Per-stock margins, interest and charges are in Settings > Funding rules.`
+    : "Leverage, interest and charges come from Settings > Funding rules.";
+}
+document.getElementById("anFunding").addEventListener("change", () => { updateMtfHint(); updateSplitHint(); });
+anTotalCapital.addEventListener("input", updateSplitHint);
+
+function setResolved(input, matchBox, r) {
+  input.dataset.resolved = r.symbol;
+  const chg = r.pct_change > 0 ? "+" + r.pct_change : r.pct_change;
+  matchBox.innerHTML = `<span class="match-ok">✓ ${escapeHtml(r.symbol)}</span> <span class="match-meta">₹${r.last_close} (${chg}%)</span>`;
+  updateSplitHint();
+}
+
+async function lookupSymbol(input, matchBox) {
+  const q = input.value.trim();
+  delete input.dataset.resolved;
+  if (!q) { matchBox.textContent = ""; return; }
+  matchBox.innerHTML = `<span class="match-meta">Searching…</span>`;
+  try {
+    const res = await fetch(`/api/search?query=${encodeURIComponent(q)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    if (input.value.trim() !== q) return; // user kept typing; ignore stale response
+    const results = data.results;
+    if (!results.length) {
+      matchBox.innerHTML = `<span class="match-err">No active NSE symbol found for “${escapeHtml(q)}”. Search matches ticker text, so try the ticker or a shorter keyword (e.g. INFY rather than Infosys).</span>`;
+      return;
+    }
+    const exact = results.find(r => r.symbol === q.toUpperCase().replace(/\s+/g, ""));
+    if (exact || results.length === 1) { setResolved(input, matchBox, exact || results[0]); return; }
+    matchBox.innerHTML = `<div class="match-meta">${results.length} matches — pick one:</div><div class="match-list"></div>`;
+    const list = matchBox.querySelector(".match-list");
+    results.forEach(r => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "match-chip";
+      b.textContent = `${r.symbol} · ₹${r.last_close}`;
+      b.addEventListener("click", () => { input.value = r.symbol; setResolved(input, matchBox, r); });
+      list.appendChild(b);
+    });
+  } catch (e) {
+    matchBox.innerHTML = `<span class="match-err">${escapeHtml(e.message)}</span>`;
+  }
+}
+
+function addStockRow(name = "") {
+  const wrap = document.createElement("div");
+  wrap.className = "stock-wrap";
+  wrap.innerHTML = `
+    <div class="stock-row">
+      <input type="text" class="stockSymbol" placeholder="Name or symbol, e.g. Reliance" value="${escapeHtml(name)}" />
+      <label class="evalchk" title="Follow this stock in Backtest and Evaluation (added when you run the analysis)"><input type="checkbox" class="stockEval"> Eval</label>
+      <button class="removeRow" title="Remove">✕</button>
+    </div>
+    <div class="match-line"></div>`;
+  const input = wrap.querySelector(".stockSymbol");
+  const matchBox = wrap.querySelector(".match-line");
+  let timer;
+  input.addEventListener("input", () => {
+    delete input.dataset.resolved;
+    updateSplitHint();
+    clearTimeout(timer);
+    timer = setTimeout(() => lookupSymbol(input, matchBox), 450);
+  });
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { clearTimeout(timer); lookupSymbol(input, matchBox); } });
+  wrap.querySelector(".removeRow").addEventListener("click", () => { wrap.remove(); updateSplitHint(); });
+  stockRows.appendChild(wrap);
+  updateSplitHint();
+}
+addStockBtn.addEventListener("click", () => addStockRow());
+["", "", "", "", ""].forEach(s => addStockRow(s));
+
+analyzeBtn.addEventListener("click", async () => {
+  // Make sure every typed name has been resolved to an NSE symbol first.
+  const inputs = [...stockRows.querySelectorAll(".stockSymbol")].filter(i => i.value.trim());
+  if (!inputs.length) { anStatus.textContent = "Add at least one stock name or symbol."; anStatus.className = "status error"; return; }
+
+  anStatus.textContent = "Resolving symbols…";
+  anStatus.className = "status";
+  await Promise.all(inputs.filter(i => !i.dataset.resolved).map(i => lookupSymbol(i, i.closest(".stock-wrap").querySelector(".match-line"))));
+
+  const unresolved = inputs.filter(i => !i.dataset.resolved).map(i => i.value.trim());
+  if (unresolved.length) {
+    anStatus.textContent = `Pick or fix a symbol for: ${unresolved.join(", ")}`;
+    anStatus.className = "status error";
+    return;
+  }
+
+  const symbols = [...new Set(inputs.map(i => i.dataset.resolved))];
+  const totalCapital = parseFloat(anTotalCapital.value) || 0;
+  const perStock = symbols.length ? totalCapital / symbols.length : 0;
+  const stocks = symbols.map(symbol => ({ symbol, allocation: perStock }));
+
+  const payload = { stocks, mode: document.getElementById("anAllocMode").value, total_capital: totalCapital, max_weight_pct: parseFloat(document.getElementById("anMaxWeight").value) || 35,
+    use_mtf: document.getElementById("anFunding").value === "mtf", mtf_limit: parseFloat(document.getElementById("anMtfLimit").value) || null };
+
+  analyzeBtn.disabled = true;
+  anStatus.textContent = "Fetching data and computing indicators…";
+  anStatus.className = "status";
+  anResults.innerHTML = "";
+  chartInstances.forEach(c => c.destroy());
+  chartInstances.length = 0;
+
+  try {
+    const res = await fetch("/api/analyze", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    renderAnalysis(data.results, data.mode, data.unallocated, data.funding);
+    window.lastResults = data.results;
+    renderRecommendPanel();
+    anStatus.textContent = "Done";
+    try {
+      const r = await addTickedToEvaluation(data.results, inputs);
+      if (r) anStatus.textContent = `Done. ${r.added} added to Evaluation` + (r.already ? `, ${r.already} already there` : "") + (r.failed ? `, ${r.failed} couldn't be analysed` : "") + ".";
+    } catch (e) { anStatus.textContent = "Done, but adding to Evaluation failed: " + e.message; anStatus.className = "status error"; }
+  } catch (e) {
+    anStatus.textContent = "Analysis failed: " + e.message;
+    anStatus.className = "status error";
+  } finally {
+    analyzeBtn.disabled = false;
+  }
+});
+
+
+/* ---------- Suggestions (recommend.py) ---------- */
+function renderRecommendPanel() {
+  const ok = (window.lastResults || []).filter(r => !r.error);
+  document.getElementById("recPanel")?.remove();
+  const panel = document.createElement("div");
+  panel.className = "side-section";
+  panel.id = "recPanel";
+  panel.innerHTML = `<h2>Suggestions</h2>
+    <label>Extra budget to deploy (₹)</label>
+    <input type="number" class="recBudget" min="0" value="100000" />
+    <div class="hint">${ok.length ? `Using your ${ok.length} analysed stock(s) to avoid overlap.` : "No analysed holdings yet, so correlation with your portfolio is skipped. Run an analysis first for a better ranking."}</div>
+    <div class="hint">Scans the 30 most-traded NSE names for LONG setups, ranks by rule score and low correlation with your holdings. Mechanical screen only, not advice.</div>
+    <button class="primary recBtn">Suggest stocks</button>
+    <div class="status recStatus"></div>`;
+  document.getElementById("recSlot").appendChild(panel);
+  const recResults = document.getElementById("recResults");
+  recResults.innerHTML = "";
+  const btn = panel.querySelector(".recBtn"), st = panel.querySelector(".recStatus"), out = recResults;
+  btn.addEventListener("click", async () => {
+    btn.disabled = true; st.className = "status recStatus"; st.textContent = "Scanning… this can take a minute."; out.innerHTML = "";
+    try {
+      const existing = ok.map(r => ({ symbol: r.symbol, dates: r.dates, close: r.close }));
+      const res = await fetch("/api/recommend", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ budget: parseFloat(panel.querySelector(".recBudget").value) || 0, existing }) });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail || res.statusText);
+      st.textContent = `Scanned ${d.scanned}, ${d.longs_found} long setup(s).` + (d.note ? " " + d.note : "");
+      if (d.picks.length) out.innerHTML = `<div class="panel"><h2>Suggested additions</h2><div class="result-scroll"><table><thead><tr><th>Symbol</th><th>Score</th><th>RSI</th><th>Corr. to portfolio</th><th>Entry</th><th>Stop</th><th>Target</th><th>Hold</th><th>52w low</th><th>52w high</th><th>Qty</th><th>Invested</th></tr></thead><tbody>${d.picks.map(p => `<tr><td>${escapeHtml(p.symbol)}</td><td>${p.score}</td><td>${p.rsi}</td><td>${p.correlation ?? "—"}</td><td>₹${p.entry}</td><td>₹${p.stop_loss}</td><td>₹${p.target}</td><td>${holdShort(p.hold)}</td><td>${p.week52?.status === "ok" ? fmtMoney(p.week52.low) : "—"}</td><td>${p.week52?.status === "ok" ? fmtMoney(p.week52.high) : "—"}</td><td>${p.quantity}</td><td>₹${p.invested.toLocaleString("en-IN")}</td></tr>`).join("")}</tbody></table></div><details class="trades"><summary>Why these holding periods</summary>${d.picks.map(p => `<div style="margin:8px 0"><b>${escapeHtml(p.symbol)}</b>: ${p.hold?.status === "proposed" ? "about " + p.hold.days + " trading days" : "none proposed"}<ul class="signal-reasons">${(p.hold?.reasoning || []).map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul></div>`).join("")}</details><button class="linkish btPicks" style="width:auto;padding:8px 14px">Backtest these picks</button><div class="hint">These are added to Evaluation as System picks so you can check how they play out.</div></div>`;
+      out.querySelector(".btPicks")?.addEventListener("click", () => {
+        evalSelected.clear();
+        (d.logged_ids || []).forEach(id => evalSelected.add(id));
+        document.querySelector('.tab[data-view="eval"]').click();
+        loadEvalList().then(runBacktest);
+      });
+    } catch (e) { st.textContent = "Failed: " + e.message; st.className = "status recStatus error"; }
+    finally { btn.disabled = false; }
+  });
+}
+
+function fmtDate(iso) {
+  const d = new Date(String(iso).slice(0, 10) + "T00:00:00");
+  return isNaN(d) ? escapeHtml(iso ?? "—") : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+}
+function ltpDateHtml(r) {
+  if (!r.ltp_date) return "—";
+  const stale = r.ltp_age_days != null && r.ltp_age_days > 3;
+  const note = stale ? ` <span style="color:#e8b84b" title="Latest data on file is ${r.ltp_age_days} days old">(${r.ltp_age_days}d old)</span>` : "";
+  return fmtDate(r.ltp_date) + note;
+}
+
+function fmtMoney(v) { return v == null ? "—" : "₹" + Number(v).toLocaleString("en-IN", { maximumFractionDigits: 2 }); }
+function holdShort(h) { return h && h.status === "proposed" ? `~${h.days} days` : "None"; }
+
+function renderRangeAndHold(r) {
+  const w = r.week52 || {}, h = r.hold || {};
+  let range;
+  if (w.status !== "ok") range = `<div class="hint" style="margin-top:0">52-week range unavailable.</div>`;
+  else {
+    const pos = w.position_pct == null ? null : Math.max(0, Math.min(100, w.position_pct));
+    range = `<div class="rangebar"><div class="rangebar-track">${pos != null ? `<div class="rangebar-dot" style="left:${pos}%"></div>` : ""}</div>
+      <div class="rangebar-ends"><span>Low ${fmtMoney(w.low)}<br><small>${fmtDate(w.low_date)}</small></span><span style="text-align:right">High ${fmtMoney(w.high)}<br><small>${fmtDate(w.high_date)}</small></span></div></div>
+      <div class="hint" style="margin-top:8px">Price ${fmtMoney(w.price)} is ${w.pct_below_high}% below the 52-week high and ${w.pct_above_low}% above the low${pos != null ? `, ${pos}% of the way up the range` : ""}. Based on ${escapeHtml(w.basis)}, split/bonus adjusted.</div>
+      ${w.partial ? `<div class="hint warn">Only ${w.days_covered} days of history were available, so this is not a full 52 weeks.</div>` : ""}
+      ${w.unchecked ? `<div class="hint warn">Corporate actions couldn't be checked, so a split or bonus could distort this range.</div>` : ""}`;
+  }
+  const head = h.status === "proposed"
+    ? `<div class="holdnum">About ${h.days} trading days</div><div class="hint" style="margin-top:2px">Check back around ${fmtDate(h.review_by)} · ${h.confidence === "higher" ? "two estimates agree" : "one estimate only, lower confidence"}</div>`
+    : `<div class="holdnum none">No holding period proposed</div>`;
+  const why = (h.reasoning || []).map(x => `<li>${escapeHtml(x)}</li>`).join("");
+  return `<div class="holdgrid"><div class="holdbox"><h4>52-week range</h4>${range}</div>
+    <div class="holdbox"><h4>Proposed holding period</h4>${head}<ul class="signal-reasons" style="margin-top:8px">${why}</ul></div></div>`;
+}
+
+const rupee = (v, d = 0) => v == null ? "—" : "₹" + Number(v).toLocaleString("en-IN", { maximumFractionDigits: d });
+const signedRupee = v => v == null ? "—" : `<span class="${v >= 0 ? "pos" : "neg"}">${v >= 0 ? "+" : "−"}₹${Math.abs(v).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</span>`;
+const signedPct = v => v == null ? "—" : `<span class="${v >= 0 ? "pos" : "neg"}">${v >= 0 ? "+" : "−"}${Math.abs(v)}%</span>`;
+
+function renderFundingPanel(ok, fs) {
+  if (!fs) return "";
+  const rows = ok.filter(r => r.funding && r.funding.position > 0);
+  if (!rows.length) return "";
+  const cards = [
+    ["Own money used", rupee(fs.own_used)],
+    ...(fs.mtf ? [["Funded by MTF", rupee(fs.funded)], ["Total position", rupee(fs.exposure)], ["Leverage", fs.leverage ? fs.leverage + "x" : "—"]] : []),
+    ["Interest per day", fs.mtf ? rupee(fs.interest_per_day, 2) : "none"],
+    ...(fs.unused_own > 1 ? [["Own cash not deployed", rupee(fs.unused_own)]] : []),
+  ];
+  let html = `<div class="panel"><h2>${fs.mtf ? "Funding and net P/L (own money + MTF)" : "Charges and net P/L"}</h2>
+    <div class="summary-cards compact" style="margin-bottom:10px">${cards.map(([l, v]) => `<div class="summary-card"><div class="label">${l}</div><div class="value">${v}</div></div>`).join("")}</div>`;
+  if (fs.mtf && fs.limit_binding) html += `<p class="caveat warn" style="margin:0 0 8px">Your MTF limit of ${rupee(fs.mtf_limit)} is the binding limit, so ${rupee(fs.unused_own)} of your own capital is not deployed. Raise the limit to use it.</p>`;
+  if (!fs.rules_customised) html += `<p class="caveat warn" style="margin:0 0 8px">Brokerage, DP and pledge charges are placeholder values. Set your broker's in Settings > Funding rules for accurate net figures.</p>`;
+  html += `<div class="result-scroll"><table class="compact"><thead><tr><th>Stock</th>${fs.mtf ? "<th class='r'>Own margin</th>" : ""}<th class="r">Position</th><th class="r">Own money</th>${fs.mtf ? "<th class='r'>Funded</th><th class='r'>Interest/day</th>" : ""}<th class="r">Hold used</th><th class="r">Break-even</th><th class="r">Net at target</th><th class="r">Net at stop</th><th class="r">Net R:R</th></tr></thead><tbody>${
+    rows.map(r => { const f = r.funding, o = f.outcomes;
+      return `<tr><td><b>${escapeHtml(r.symbol)}</b></td>${fs.mtf ? `<td class="r" title="${escapeHtml(f.margin_source)}">${f.own_margin_pct}% <span class="hint" style="margin:0">(${f.leverage}x)</span></td>` : ""}<td class="r">${rupee(f.position)}</td><td class="r">${rupee(f.own)}</td>${fs.mtf ? `<td class="r">${rupee(f.funded)}</td><td class="r">${rupee(f.interest_per_day, 2)}</td>` : ""}
+        <td class="r">${o ? f.hold_days + "d" + (f.hold_basis === "assumed" ? ' <span class="warn" title="No holding period was proposed, so the assumed period from Settings is used">*</span>' : "") : "—"}</td>
+        <td class="r">${o && o.break_even ? rupee(o.break_even, 2) + ` <span class="hint" style="margin:0">(+${o.break_even_pct}%)</span>` : "—"}</td>
+        <td class="r">${o ? signedRupee(o.target_net.net) : "—"}</td><td class="r">${o ? signedRupee(o.stop_net.net) : "—"}</td><td class="r">${o && o.net_rr != null ? o.net_rr : "—"}</td></tr>`; }).join("")}</tbody></table></div>
+    <div class="hint">Net = gross P/L − brokerage, STT, exchange, SEBI, stamp, DP and GST on both legs${fs.mtf ? " − interest" : ""}. ${fs.mtf ? `Interest is ${fs.interest_pct}% a year on the funded part, counted in calendar days to the review date; it is lower if the trade exits sooner. ` : ""}Break-even is the exit price where net P/L is zero. * marks an assumed hold period. An estimate from your rules; it will not match a contract note exactly. Not investment advice.</div></div>`;
+  return html;
+}
+
+function renderCostBox(r) {
+  const f = r.funding;
+  if (!f || !f.position) return "";
+  const o = f.outcomes;
+  const funded = f.mtf ? `${rupee(f.own)} own + ${rupee(f.funded)} funded (${f.leverage}x)` : `${rupee(f.own)} own money`;
+  if (!o) return `<div class="holdbox" style="margin-bottom:14px"><h4>Funding</h4><div class="hint" style="margin-top:0">${funded}${f.mtf ? ` · interest ${rupee(f.interest_per_day, 2)} a day` : ""}. No LONG setup, so no net outcome is shown.</div></div>`;
+  const lines = [
+    `<li>Position ${rupee(f.position)}: ${funded}${f.mtf ? `. Interest ${rupee(f.interest_per_day, 2)} a day, ${rupee(f.interest_to_review, 2)} over ${f.calendar_days} calendar days (to ${fmtDate(f.review_by)}).` : "."}</li>`,
+    `<li>Hold used: ${f.hold_days} trading days (${f.hold_basis === "proposed" ? "proposed" : "assumed, no proposal"}).</li>`,
+    `<li>At the target ${rupee(o.target, 2)}: gross ${signedRupee(o.target_net.gross)}, charges −${rupee(o.target_net.charges)}${f.mtf ? `, interest −${rupee(o.target_net.interest)}` : ""}, <b>net ${signedRupee(o.target_net.net)}</b>${o.target_pct_own != null ? ` (${signedPct(o.target_pct_own)} on your own money)` : ""}.</li>`,
+    `<li>At the stop ${rupee(o.stop, 2)}: gross ${signedRupee(o.stop_net.gross)}, charges −${rupee(o.stop_net.charges)}${f.mtf ? `, interest −${rupee(o.stop_net.interest)}` : ""}, <b>net ${signedRupee(o.stop_net.net)}</b>${o.stop_pct_own != null ? ` (${signedPct(o.stop_pct_own)} on your own money)` : ""}.</li>`,
+    `<li>Break-even exit price ${o.break_even ? rupee(o.break_even, 2) + ` (+${o.break_even_pct}% above entry)` : "not reached within +50%"}. Reward:risk is ${o.gross_rr ?? "—"} before costs and ${o.net_rr ?? "—"} after.</li>`];
+  return `<div class="holdbox" style="margin-bottom:14px"><h4>${f.mtf ? "Funding and net P/L" : "Charges and net P/L"}</h4><ul class="signal-reasons" style="margin:0">${lines.join("")}</ul></div>`;
+}
+
+function renderCaNotes(r) {
+  if (r.ca_status === "unavailable")
+    return `<div class="hint" style="color:#e8b84b;margin-bottom:8px">Corporate actions could not be fetched, so prices are unchecked for splits/bonuses.</div>`;
+  const notes = r.ca_notes || [];
+  if (!notes.length) return `<div class="hint" style="margin-bottom:8px">No corporate actions in this window.</div>`;
+  const items = notes.map(n => {
+    const tag = n.adjusted ? `<b style="color:#e8b84b">${escapeHtml(n.type)} - prices before this date adjusted (factor ${n.factor})</b>` : `${escapeHtml(n.type)} - no price adjustment`;
+    return `<li>${fmtDate(n.exDate)}: ${tag}${n.purpose ? " &middot; " + escapeHtml(n.purpose) : ""}</li>`;
+  }).join("");
+  const adj = notes.some(n => n.adjusted) ? `<div class="hint" style="color:#e8b84b">Server MA20/MA50 above are unadjusted and may differ from the chart SMAs.</div>` : "";
+  return `<div class="hint" style="margin-bottom:8px">Corporate actions (ex-date in window):<ul class="signal-reasons">${items}</ul>${adj}</div>`;
+}
+
+function renderSignal(sig) {
+  if (!sig) return "";
+  const reasons = (sig.reasons || []).map(r => `<li>${escapeHtml(r)}</li>`).join("");
+  if (sig.signal === "LONG") {
+    return `<div class="signal-box long">
+      <span class="signal-badge long">LONG SETUP</span><span style="font-size:12px;color:var(--muted)">Rule score ${sig.score}</span>
+      <div class="signal-figures">
+        <div><div class="label">Entry</div><div class="value">₹${sig.entry}</div></div>
+        <div><div class="label">Stop loss</div><div class="value" style="color:var(--danger)">₹${sig.stop_loss}</div></div>
+        <div><div class="label">Target</div><div class="value" style="color:var(--accent)">₹${sig.target}</div></div>
+        <div><div class="label">Risk / share</div><div class="value">₹${sig.risk_per_share}</div></div>
+        <div><div class="label">Reward : Risk</div><div class="value">${sig.reward_risk_ratio}</div></div>
+      </div>
+      <ul class="signal-reasons">${reasons}</ul>
+    </div>`;
+  }
+  return `<div class="signal-box no-trade">
+    <span class="signal-badge no-trade">NO TRADE</span><span style="font-size:12px;color:var(--muted)">${sig.score ? "Rule score " + sig.score + " — setup not supported" : "Insufficient data"}</span>
+    <ul class="signal-reasons">${reasons}</ul>
+  </div>`;
+}
+
+function renderAnalysis(results, mode, unallocated, fsum) {
+  const ok = results.filter(r => !r.error);
+  const totalAlloc = results.reduce((s, r) => s + (r.allocation || 0), 0);
+  const totalInvested = ok.reduce((s, r) => s + (r.invested || 0), 0);
+
+  let html = `<div class="summary-cards">
+    <div class="summary-card"><div class="label">Total allocated</div><div class="value">₹${totalAlloc.toLocaleString("en-IN")}</div></div>
+    <div class="summary-card"><div class="label">Total invested</div><div class="value">₹${totalInvested.toLocaleString("en-IN")}</div></div>
+    ${mode === "suggested" && unallocated && unallocated.amount > 0 ? `<div class="summary-card"><div class="label">Unallocated</div><div class="value">₹${unallocated.amount.toLocaleString("en-IN")}</div></div>` : ""}
+    <div class="summary-card"><div class="label">Stocks analysed</div><div class="value">${ok.length}/${results.length}</div></div>
+  </div>`;
+
+  if (mode === "suggested") {
+    const longs = ok.filter(r => r.weight_pct > 0).length;
+    const un = unallocated || { pct: 0, amount: 0 };
+    html += `<div class="panel"><h2>How the capital was split</h2>
+      <div class="hint" style="margin-top:0">Only stocks with a LONG setup get capital; stocks with No trade get nothing. Among the LONG stocks, each weight starts from 1 divided by its yearly volatility, so calmer stocks get more, and no stock may exceed the cap you set. This is a mechanical rule based on past prices. It does not predict returns and is not investment advice.</div>
+      ${!longs ? `<p class="caveat warn" style="margin:10px 0 0">None of your stocks has a LONG setup right now, so nothing was allocated and all ₹${(un.amount||0).toLocaleString("en-IN")} is unallocated.</p>`
+        : un.pct > 0.05 ? `<p class="caveat warn" style="margin:10px 0 0">₹${un.amount.toLocaleString("en-IN")} (${un.pct}%) is unallocated, because the cap stops the ${longs} LONG stock${longs > 1 ? "s" : ""} from taking all of it. Raise "Maximum per stock" or add more stocks to deploy it.</p>` : ""}
+      <div class="result-scroll" style="margin-top:10px"><table><thead><tr><th>Symbol</th><th>Weight</th><th>Yearly volatility</th><th>Basis</th></tr></thead><tbody>${ok.map(r => `<tr><td>${escapeHtml(r.symbol)}</td><td>${r.weight_pct}%</td><td>${r.alloc_basis?.vol_pct != null ? r.alloc_basis.vol_pct + "%" : "—"}${r.alloc_basis?.vol_estimated ? ' <span class="warn" title="Not enough history; the median of your other LONG stocks was used">(estimated)</span>' : ""}</td><td>${escapeHtml(r.alloc_basis?.basis || "")}</td></tr>`).join("")}</tbody></table></div></div>`;
+  }
+  html += renderFundingPanel(ok, fsum);
+  html += `<div class="panel"><h2>Summary</h2><div class="result-scroll"><table>
+    <thead><tr><th>Symbol</th><th>Weight</th><th>Allocated</th><th>LTP</th><th>LTP date</th><th>Qty</th><th>Invested</th><th>Leftover</th><th>Signal</th><th>Entry</th><th>Stop loss</th><th>Target</th><th>Hold</th><th>52w low</th><th>52w high</th></tr></thead>
+    <tbody>${results.map(r => r.error
+      ? `<tr><td>${escapeHtml(r.symbol)}</td><td colspan="14" style="color:var(--danger)">${escapeHtml(r.error)}</td></tr>`
+      : `<tr><td>${escapeHtml(r.symbol)}${(r.corporate_adjustments||[]).length ? ' <span title="Split/bonus adjusted" style="color:#e8b84b">CA</span>' : ''}</td><td>${r.weight_pct != null ? r.weight_pct + "%" : "—"}</td><td>₹${(r.allocation||0).toLocaleString("en-IN")}</td><td>${r.latest_price ?? "—"}</td><td>${ltpDateHtml(r)}</td><td>${r.quantity ?? "—"}</td><td>₹${(r.invested||0).toLocaleString("en-IN")}</td><td>₹${(r.leftover||0).toLocaleString("en-IN")}</td>
+          <td>${r.trade_signal?.signal === "LONG" ? "<b style='color:var(--accent)'>LONG</b>" : "<span style='color:var(--muted)'>No trade</span>"}</td>
+          <td>${r.trade_signal?.entry ?? "—"}</td><td>${r.trade_signal?.stop_loss ?? "—"}</td><td>${r.trade_signal?.target ?? "—"}</td><td>${holdShort(r.hold)}</td><td>${r.week52?.status === "ok" ? fmtMoney(r.week52.low) : "—"}</td><td>${r.week52?.status === "ok" ? fmtMoney(r.week52.high) : "—"}</td></tr>`
+    ).join("")}</tbody>
+  </table></div></div>`;
+
+  html += `<div class="hint" style="margin-bottom:16px">Signals are a simple rule-based heuristic (SMA trend + MACD + RSI zone) for informational purposes only — not investment advice or a recommendation. Long setups only; it defaults to No trade when the checks don't line up. Data via NSE MCP is for informational and educational use.</div>`;
+  anResults.innerHTML = html;
+
+  ok.forEach(r => {
+    const card = document.createElement("div");
+    card.className = "stock-card";
+    card.innerHTML = `
+      <h3>${escapeHtml(r.symbol)}</h3>
+      <div class="meta">${r.weight_pct != null ? "Weight " + r.weight_pct + "% · " : ""}${r.annual_vol_pct != null ? "Volatility " + r.annual_vol_pct + "% a year · " : ""}LTP ₹${r.latest_price} as of ${ltpDateHtml(r)} · MA20 ₹${r.moving_average_20 ?? "—"} · MA50 ₹${r.moving_average_50 ?? "—"} · Qty ${r.quantity ?? "—"} · Invested ₹${(r.invested||0).toLocaleString("en-IN")} · Leftover ₹${(r.leftover||0).toLocaleString("en-IN")}</div>
+      ${renderCaNotes(r)}
+      ${renderSignal(r.trade_signal)}
+      ${renderRangeAndHold(r)}
+      ${renderCostBox(r)}
+      <div class="chart-wrap"><canvas></canvas></div>
+      <div class="chart-wrap small"><canvas></canvas></div>`;
+    anResults.appendChild(card);
+
+    const [priceCanvas, rsiCanvas] = card.querySelectorAll("canvas");
+
+    chartInstances.push(new Chart(priceCanvas, {
+      type: "line",
+      data: {
+        labels: r.dates,
+        datasets: [
+          { label: "Close", data: r.close, borderColor: "#4f8cff", pointRadius: 0, borderWidth: 1.5, tension: 0.1 },
+          { label: "SMA20", data: r.sma20, borderColor: "#3fb984", pointRadius: 0, borderWidth: 1.5, tension: 0.1 },
+          { label: "SMA50", data: r.sma50, borderColor: "#e8b84b", pointRadius: 0, borderWidth: 1.5, tension: 0.1 },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: { legend: { labels: { color: "#e6edf3", boxWidth: 12 } } },
+        scales: {
+          x: { ticks: { color: "#8b98a5", maxTicksLimit: 8 }, grid: { color: "#263544" } },
+          y: { ticks: { color: "#8b98a5" }, grid: { color: "#263544" } },
+        },
+      },
+    }));
+
+    chartInstances.push(new Chart(rsiCanvas, {
+      type: "line",
+      data: { labels: r.dates, datasets: [{ label: "RSI(14)", data: r.rsi, borderColor: "#c979e0", pointRadius: 0, borderWidth: 1.5, tension: 0.1 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: "#e6edf3", boxWidth: 12 } } },
+        scales: {
+          x: { ticks: { color: "#8b98a5", maxTicksLimit: 8 }, grid: { color: "#263544" } },
+          y: { min: 0, max: 100, ticks: { color: "#8b98a5" }, grid: { color: "#263544" } },
+        },
+      },
+    }));
+  });
+
+  if (!ok.length) {
+    anResults.innerHTML += '<div class="empty">No stock came back with usable data — check the errors in the summary table above.</div>';
+  }
+}
+
+/* ================= Evaluation: stocks picked by you and by the system ================= */
+const btCharts = [], btData = {};
+let evalEntries = [], evalOutcome = {}, evalChecked = null, evalFilter = "all";
+const evalSelected = new Set();
+const pct = v => v == null ? "—" : `<span class="${v > 0 ? "pos" : v < 0 ? "neg" : ""}">${v > 0 ? "+" : ""}${v}%</span>`;
+const num = v => v == null ? "—" : v;
+const SRC_LABEL = { user: "You", system: "System" };
+const STATUS_LABEL = { target: "Target hit", stopped: "Stopped", expired: "Time limit", open: "Open", pending: "Pending", no_data: "No data", no_setup: "No setup" };
+const shortDate = iso => { const d = new Date(String(iso).slice(0, 10) + "T00:00:00"); return isNaN(d) ? "—" : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }); };
+const rowOf = e => ({ ...e, ...(evalOutcome[e.id] || {}), source: e.source || "system" });
+
+document.getElementById("btRun").addEventListener("click", () => runBacktest());
+document.getElementById("trRefresh").addEventListener("click", () => refreshOutcomes());
+document.querySelector('.tab[data-view="eval"]').addEventListener("click", () => loadEvalList());
+
+async function addTickedToEvaluation(results, inputs) {
+  const ticked = new Set(inputs.filter(i => i.closest(".stock-wrap").querySelector(".stockEval").checked).map(i => i.dataset.resolved));
+  if (!ticked.size) return null;
+  const items = results.filter(r => !r.error && ticked.has(r.symbol)).map(r => {
+    const sig = r.trade_signal || {}, long = sig.signal === "LONG";
+    return { symbol: r.symbol, as_of: String(r.ltp_date).slice(0, 10),
+      ...(long ? { entry: sig.entry, stop_loss: sig.stop_loss, target: sig.target, score: sig.score, hold_days: r.hold && r.hold.status === "proposed" ? r.hold.days : null } : {}) };
+  });
+  const failed = ticked.size - items.length;
+  if (!items.length) return { added: 0, already: 0, failed };
+  const res = await fetch("/api/track/add", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: "user", items }) });
+  const d = await res.json();
+  if (!res.ok) throw new Error(typeof d.detail === "string" ? d.detail : res.statusText);
+  d.ids.forEach(id => evalSelected.add(id));
+  loadEvalList().catch(() => {});
+  return { added: d.added, already: d.skipped, failed };
+}
+
+async function loadEvalList() {
+  try {
+    const res = await fetch("/api/track/list");
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.detail || res.statusText);
+    evalEntries = d.entries;
+    const ids = new Set(evalEntries.map(e => e.id));
+    [...evalSelected].forEach(id => { if (!ids.has(id)) evalSelected.delete(id); });
+    renderEval();
+  } catch (e) { document.getElementById("trResults").innerHTML = `<div class="empty">Couldn't load the list: ${escapeHtml(e.message)}</div>`; }
+}
+
+async function refreshOutcomes() {
+  const st = document.getElementById("trStatus"), btn = document.getElementById("trRefresh");
+  btn.disabled = true; st.className = "status"; st.textContent = "Checking outcomes…";
+  try {
+    const res = await fetch(`/api/track?max_hold=${+document.getElementById("btHold").value || 20}&cost_pct=${parseFloat(document.getElementById("btCost").value) || 0}`);
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.detail || res.statusText);
+    d.entries.forEach(e => { evalOutcome[e.id] = e; });
+    evalEntries = d.entries; evalChecked = new Date();
+    renderEval(); st.textContent = "Updated " + evalChecked.toLocaleTimeString("en-IN");
+  } catch (e) { st.textContent = "Could not refresh: " + e.message; st.className = "status error"; }
+  finally { btn.disabled = false; }
+}
+
+function summarize(rows) {
+  const done = rows.filter(r => ["target", "stopped", "expired"].includes(r.status));
+  const wins = done.filter(r => r.return_pct > 0);
+  return { n: rows.length, done: done.length, target: done.filter(r => r.status === "target").length,
+    stopped: done.filter(r => r.status === "stopped").length, open: rows.filter(r => ["open", "pending"].includes(r.status)).length,
+    win: done.length ? Math.round(1000 * wins.length / done.length) / 10 : null,
+    avg: done.length ? Math.round(100 * done.reduce((a, r) => a + r.return_pct, 0) / done.length) / 100 : null };
+}
+
+function selectedSymbols() {
+  return [...new Set(evalEntries.filter(e => evalSelected.has(e.id)).map(e => e.symbol))];
+}
+function updateBtLabel() { document.getElementById("btRun").textContent = `Backtest selected (${selectedSymbols().length})`; }
+
+function renderEval() {
+  const out = document.getElementById("trResults");
+  updateBtLabel();
+  if (!evalEntries.length) {
+    out.innerHTML = `<div class="panel"><h2>Evaluation</h2><div class="empty" style="padding:24px">No stocks yet. Tick <b>Eval</b> on a stock in Portfolio analysis and run the analysis, or use Suggest stocks. Stocks you pick are marked <b>You</b>, and ones the app finds are marked <b>System</b>.</div></div>`;
+    return;
+  }
+  const rows = evalEntries.map(rowOf);
+  const count = k => rows.filter(r => k === "all" || r.source === k).length;
+  const tracked = rows.filter(r => r.status !== "no_setup" && (r.entry != null));
+  const sum = {
+    all: summarize(tracked), user: summarize(tracked.filter(r => r.source === "user")),
+    system: summarize(tracked.filter(r => r.source === "system")), taken: summarize(tracked.filter(r => r.taken)) };
+  const checked = evalChecked != null;
+  const sumRow = (label, k, total) => { const x = sum[k]; return `<tr><td>${label}</td><td class="r">${total}</td><td class="r">${checked ? x.done : "—"}</td><td class="r">${checked ? x.target : "—"}</td><td class="r">${checked ? x.stopped : "—"}</td><td class="r">${checked ? x.open : "—"}</td><td class="r">${x.win != null ? x.win + "%" : "—"}</td><td class="r">${pct(x.avg)}</td></tr>`; };
+  const shown = rows.filter(r => evalFilter === "all" || r.source === evalFilter);
+
+  let html = `<h2 style="margin-bottom:8px">Evaluation</h2>
+    <div class="panel" style="padding:10px 12px"><div class="result-scroll"><table class="compact"><thead><tr><th>Picked by</th><th class="r">Stocks</th><th class="r">Finished</th><th class="r">Target</th><th class="r">Stopped</th><th class="r">Open</th><th class="r">Win rate</th><th class="r">Avg return</th></tr></thead><tbody>
+      ${sumRow('<span class="badge src-user">You</span>', "user", count("user"))}
+      ${sumRow('<span class="badge src-system">System</span>', "system", count("system"))}
+      ${sumRow("All", "all", count("all"))}
+      ${sum.taken.n ? sumRow("You took", "taken", sum.taken.n) : ""}
+    </tbody></table></div>
+    <div class="hint">${checked ? "Outcomes as of " + evalChecked.toLocaleTimeString("en-IN") + "." : "Outcomes not checked yet. Click Refresh outcomes."} ${sum.all.done < 30 && checked ? `Only ${sum.all.done} finished, so these rates say little yet.` : ""} Stocks marked No setup had no LONG setup when added, so they can be backtested but have no outcome to track.</div></div>`;
+
+  html += `<div class="chips">${[["all", "All"], ["user", "You"], ["system", "System"]].map(([k, l]) => `<button type="button" class="chipbtn${evalFilter === k ? " on" : ""}" data-f="${k}">${l} (${count(k)})</button>`).join("")}
+    <span class="hint" style="margin:0 0 0 6px">Tick stocks to backtest them.</span></div>`;
+
+  html += `<div class="panel" style="padding:8px 10px"><div class="result-scroll"><table class="compact"><thead><tr>
+    <th><input type="checkbox" id="evAll" aria-label="Select all shown"></th><th>Stock</th><th>By</th><th>Added</th><th>Entry / stop / target</th><th>Status</th><th class="r">Return</th><th class="r">Hold</th><th>Took</th><th></th></tr></thead><tbody>${
+    shown.map(r => {
+      const lv = r.entry != null ? `${r.entry} / ${r.stop_loss} / ${r.target}` : "—";
+      const label = r.status ? STATUS_LABEL[r.status] || r.status : "—";
+      const note = r.status === "no_setup" ? "No LONG setup when added: nothing to track, backtest only" : r.error || "";
+      const px = r.exit_price ?? r.current_price;
+      return `<tr><td><input type="checkbox" class="evSel" data-id="${r.id}" ${evalSelected.has(r.id) ? "checked" : ""} aria-label="Select ${escapeHtml(r.symbol)}"></td>
+        <td><b>${escapeHtml(r.symbol)}</b></td><td><span class="badge src-${r.source}">${SRC_LABEL[r.source] || r.source}</span></td><td>${shortDate(r.as_of)}</td><td class="lv">${lv}</td>
+        <td>${r.status ? `<span class="badge ${r.status}" ${note ? `title="${escapeHtml(note)}"` : ""}>${label}</span>` : '<span class="hint" style="margin:0">—</span>'}${px != null && r.status ? ` <span class="hint" style="margin:0" title="${r.exit_price != null ? "Exit price" : "Current price"}">₹${px}</span>` : ""}</td>
+        <td class="r">${r.return_pct != null ? pct(r.return_pct) : "—"}</td><td class="r">${r.hold_days ? r.hold_days + "d" : "—"}</td>
+        <td><input type="checkbox" class="evTaken" data-id="${r.id}" ${r.taken ? "checked" : ""} aria-label="Taken"></td>
+        <td><button class="rm" data-id="${r.id}" title="Remove from list" aria-label="Remove">✕</button></td></tr>`;
+    }).join("")}</tbody></table></div></div>`;
+  out.innerHTML = html;
+
+  out.querySelectorAll(".chipbtn").forEach(b => b.addEventListener("click", () => { evalFilter = b.dataset.f; renderEval(); }));
+  const all = out.querySelector("#evAll");
+  all.checked = shown.length > 0 && shown.every(r => evalSelected.has(r.id));
+  all.addEventListener("change", () => { shown.forEach(r => all.checked ? evalSelected.add(r.id) : evalSelected.delete(r.id)); renderEval(); });
+  out.querySelectorAll(".evSel").forEach(b => b.addEventListener("change", () => { b.checked ? evalSelected.add(b.dataset.id) : evalSelected.delete(b.dataset.id); updateBtLabel(); all.checked = shown.every(r => evalSelected.has(r.id)); }));
+  out.querySelectorAll(".evTaken").forEach(b => b.addEventListener("change", async () => {
+    await fetch(`/api/track/${b.dataset.id}/taken`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ taken: b.checked }) });
+    const e = evalEntries.find(x => x.id === b.dataset.id); if (e) e.taken = b.checked;
+    if (evalOutcome[b.dataset.id]) evalOutcome[b.dataset.id].taken = b.checked;
+    renderEval();
+  }));
+  out.querySelectorAll(".rm").forEach(b => b.addEventListener("click", async () => {
+    await fetch(`/api/track/${b.dataset.id}`, { method: "DELETE" });
+    evalEntries = evalEntries.filter(x => x.id !== b.dataset.id); delete evalOutcome[b.dataset.id]; evalSelected.delete(b.dataset.id);
+    renderEval();
+  }));
+}
+
+async function runBacktest() {
+  const st = document.getElementById("btStatus"), btn = document.getElementById("btRun"), out = document.getElementById("btResults");
+  const symbols = selectedSymbols();
+  if (!symbols.length) { st.textContent = "Tick at least one stock in the list."; st.className = "status error"; return; }
+  btn.disabled = true; st.className = "status"; st.textContent = `Backtesting ${symbols.length} stock${symbols.length > 1 ? "s" : ""}… this can take a minute.`;
+  btCharts.forEach(c => c.destroy()); btCharts.length = 0;
+  out.innerHTML = '<div class="empty">Running backtest…</div>';
+  try {
+    const res = await fetch("/api/backtest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+      symbols, months: +document.getElementById("btMonths").value,
+      max_hold: +document.getElementById("btHold").value || 20, cost_pct: parseFloat(document.getElementById("btCost").value) || 0 }) });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.detail || res.statusText);
+    renderBacktest(d, out); st.textContent = "Done";
+    out.scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (e) { out.innerHTML = '<div class="empty">No result</div>'; st.textContent = "Backtest failed: " + e.message; st.className = "status error"; }
+  finally { btn.disabled = false; }
+}
+
+function sourcesOf(sym) {
+  const s = new Set(evalEntries.filter(e => e.symbol === sym).map(e => e.source || "system"));
+  return [...s].map(k => `<span class="badge src-${k}">${SRC_LABEL[k]}</span>`).join(" ") || "—";
+}
+
+function renderBacktest(d, out) {
+  const p = d.pooled, ok = d.results.filter(r => !r.error);
+  Object.keys(btData).forEach(k => delete btData[k]);
+  ok.forEach(r => { btData[r.symbol] = r; });
+  let html = `<h2 style="margin:6px 0 8px">Backtest</h2>`;
+  if (p) {
+    html += `<div class="summary-cards compact">
+      <div class="summary-card"><div class="label">Trades</div><div class="value">${p.trades}</div></div>
+      <div class="summary-card"><div class="label">Win rate</div><div class="value">${p.win_rate ?? "—"}${p.win_rate != null ? "%" : ""}</div></div>
+      <div class="summary-card"><div class="label">Avg per trade</div><div class="value">${pct(p.avg_return_pct)}</div></div>
+      <div class="summary-card"><div class="label">Profit factor</div><div class="value">${num(p.profit_factor)}</div></div>
+      <div class="summary-card"><div class="label">Strategy vs buy and hold</div><div class="value">${pct(p.avg_strategy_return_pct)} <span style="font-size:12px;color:var(--muted)">vs</span> ${pct(p.avg_buy_hold_return_pct)}</div></div>
+    </div>`;
+    if (p.small_sample) html += `<p class="caveat warn" style="margin-top:8px">Only ${p.trades} closed trades, too few to say whether the rules have an edge.</p>`;
+  }
+  html += `<p class="caveat" style="margin-top:8px">${d.params.months} months, max ${d.params.max_hold} trading days per trade, ${d.params.cost_pct}% round-trip cost, split/bonus adjusted. Entry at the signal day's close; a day touching both stop and target counts as a stop. Stocks picked because they look strong today flatter a backtest, so the outcomes above are the fairer test.</p>`;
+  html += `<div class="panel" style="padding:8px 10px"><div class="result-scroll"><table class="compact"><thead><tr><th>Stock</th><th>By</th><th class="r">Trades</th><th class="r">Win rate</th><th class="r">Avg/trade</th><th class="r">Strategy</th><th class="r">Buy+hold</th><th class="r">Max drawdown</th><th class="r">In market</th><th class="r">Target/stop/time</th></tr></thead><tbody>${
+    d.results.map(r => r.error ? `<tr><td><b>${escapeHtml(r.symbol)}</b></td><td>${sourcesOf(r.symbol)}</td><td colspan="8" style="color:var(--danger)">${escapeHtml(r.error)}</td></tr>`
+      : `<tr><td><b>${escapeHtml(r.symbol)}</b></td><td>${sourcesOf(r.symbol)}</td><td class="r">${r.metrics.trades}${r.metrics.open_trades ? "+1" : ""}</td><td class="r">${r.metrics.win_rate ?? "—"}${r.metrics.win_rate != null ? "%" : ""}</td><td class="r">${pct(r.metrics.avg_return_pct)}</td><td class="r">${pct(r.metrics.strategy_return_pct)}</td><td class="r">${pct(r.metrics.buy_hold_return_pct)}</td><td class="r">${r.metrics.max_drawdown_pct}%</td><td class="r">${r.metrics.exposure_pct}%</td><td class="r">${r.metrics.target_hits}/${r.metrics.stop_hits}/${r.metrics.time_exits}</td></tr>`).join("")}</tbody></table></div></div>`;
+  html += ok.map(r => `<details class="stockdet" data-sym="${escapeHtml(r.symbol)}"><summary><b>${escapeHtml(r.symbol)}</b> <span class="hint" style="margin:0">${r.trades.length} trade${r.trades.length === 1 ? "" : "s"}, chart and trade list</span></summary>
+    <div class="chart-wrap mid"><canvas></canvas></div>
+    ${r.trades.length ? `<div class="result-scroll"><table class="compact"><thead><tr><th>Entered</th><th class="r">Entry</th><th class="r">Stop</th><th class="r">Target</th><th>Exited</th><th class="r">Exit</th><th>Result</th><th class="r">Days</th><th class="r">Net</th></tr></thead><tbody>${r.trades.map(t => `<tr><td>${shortDate(t.entry_date)}</td><td class="r">₹${t.entry}</td><td class="r">₹${t.stop}</td><td class="r">₹${t.target}</td><td>${shortDate(t.exit_date)}</td><td class="r">₹${t.exit}</td><td><span class="badge ${t.reason === "target" ? "target" : t.reason === "stop" ? "stopped" : t.reason === "time" ? "expired" : "open"}">${t.reason === "time" ? "time limit" : t.reason}</span></td><td class="r">${t.bars}</td><td class="r">${pct(t.ret_pct)}</td></tr>`).join("")}</tbody></table></div>` : '<div class="hint">No setups triggered in this period.</div>'}</details>`).join("");
+  out.innerHTML = html;
+  out.querySelectorAll("details.stockdet").forEach(det => det.addEventListener("toggle", () => {
+    if (!det.open || det.dataset.drawn) return;
+    det.dataset.drawn = "1";
+    const r = btData[det.dataset.sym];
+    btCharts.push(new Chart(det.querySelector("canvas"), { type: "line",
+      data: { labels: r.dates, datasets: [
+        { label: "Strategy", data: r.equity, borderColor: "#5b8def", pointRadius: 0, borderWidth: 1.8 },
+        { label: "Buy and hold", data: r.buy_hold, borderColor: "#8596a6", pointRadius: 0, borderWidth: 1.3, borderDash: [5, 4] }] },
+      options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+        plugins: { legend: { labels: { color: "#e4ebf2", boxWidth: 12 } } },
+        scales: { x: { ticks: { color: "#8596a6", maxTicksLimit: 8 }, grid: { color: "#233242" } }, y: { ticks: { color: "#8596a6" }, grid: { color: "#233242" } } } } }));
+  }));
+}
+
+/* ================= Settings: Anthropic API key and model ================= */
+const settingsTab = document.querySelector('.tab[data-view="settings"]');
+const stResult = document.getElementById("stResult");
+settingsTab.addEventListener("click", () => loadSettings());
+document.addEventListener("assistant:open-settings", () => settingsTab.click());
+if (location.hash === "#settings") settingsTab.click();
+
+function showSettingsResult(ok, html) { stResult.innerHTML = `<div class="result-msg ${ok ? "ok" : "bad"}">${html}</div>`; }
+function settingsFix(code) {
+  if (code === "billing") return ' <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener">Open Plans &amp; Billing</a>';
+  if (code === "invalid_key" || code === "no_key") return ' <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Open API keys</a>';
+  return "";
+}
+function renderKeyStatus(d) {
+  document.getElementById("stKeyStatus").innerHTML = d.has_key
+    ? `<span class="pos">●</span> Key set: <code>${escapeHtml(d.key_hint)}</code>`
+    : `<span class="neg">●</span> No key set`;
+  document.getElementById("stModel").placeholder = d.default_model;
+}
+async function settingsCall(url, opts) {
+  const res = await fetch(url, opts);
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(typeof d.detail === "string" ? d.detail : res.statusText);
+  return d;
+}
+async function loadSettings() {
+  try {
+    const d = await settingsCall("/api/settings");
+    renderKeyStatus(d);
+    document.getElementById("stModel").value = d.model;
+  } catch (e) { document.getElementById("stKeyStatus").textContent = "Couldn't load settings: " + e.message; }
+}
+function busy(on) { ["stSave", "stTest", "stRemove"].forEach(id => document.getElementById(id).disabled = on); }
+function showTest(t) { showSettingsResult(t.ok, escapeHtml(t.message) + (t.ok ? "" : settingsFix(t.code))); }
+
+document.getElementById("stSave").addEventListener("click", async () => {
+  const key = document.getElementById("stKey").value.trim(), model = document.getElementById("stModel").value.trim();
+  const body = { model };
+  if (key) body.api_key = key;
+  busy(true); showSettingsResult(true, "Saving and testing…");
+  try {
+    const d = await settingsCall("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    document.getElementById("stKey").value = "";
+    renderKeyStatus(d); document.getElementById("stModel").value = d.model;
+    showTest({ ...d.test, message: "Saved. " + d.test.message });
+  } catch (e) { showSettingsResult(false, escapeHtml(e.message)); }
+  finally { busy(false); }
+});
+document.getElementById("stTest").addEventListener("click", async () => {
+  busy(true); showSettingsResult(true, "Testing…");
+  try { showTest(await settingsCall("/api/settings/test", { method: "POST" })); }
+  catch (e) { showSettingsResult(false, escapeHtml(e.message)); }
+  finally { busy(false); }
+});
+document.getElementById("stRemove").addEventListener("click", async () => {
+  if (!confirm("Remove the saved API key? The chat assistant will stop working until you add one again.")) return;
+  busy(true);
+  try { renderKeyStatus(await settingsCall("/api/settings/key", { method: "DELETE" })); showSettingsResult(true, "Key removed."); }
+  catch (e) { showSettingsResult(false, escapeHtml(e.message)); }
+  finally { busy(false); }
+});
+
+
+/* ================= Settings: funding rules ================= */
+const FR_FIELDS = ["default_leverage", "interest_pct", "day_count", "assumed_hold_days", "brokerage_pct", "brokerage_cap", "brokerage_min", "dp_charge", "pledge_fee", "unpledge_fee", "stt_pct", "exchange_pct", "sebi_per_crore", "stamp_buy_pct", "gst_pct"];
+function fillFundingForm(rules, stocksText) {
+  FR_FIELDS.forEach(k => { document.getElementById("fr_" + k).value = rules[k]; });
+  document.getElementById("fr_stocks").value = stocksText || "";
+  updateMarginHint();
+}
+function updateMarginHint() {
+  const lev = parseFloat(document.getElementById("fr_default_leverage").value);
+  document.getElementById("frMarginHint").textContent = lev >= 1 ? `Own margin ${(100 / lev).toFixed(2)}%, funded ${(100 - 100 / lev).toFixed(2)}%.` : "";
+}
+document.getElementById("fr_default_leverage").addEventListener("input", updateMarginHint);
+function showFr(ok, msg) { document.getElementById("frResult").innerHTML = `<div class="result-msg ${ok ? "ok" : "bad"}">${escapeHtml(msg)}</div>`; }
+async function loadFundingRules() {
+  try { const d = await settingsCall("/api/funding/rules"); fundingInfo = d; fillFundingForm(d.rules, d.stocks_text); updateMtfHint();
+    if (!d.rules.customised) showFr(true, "Showing defaults. Brokerage, DP and pledge values are placeholders until you save your own."); }
+  catch (e) { showFr(false, "Couldn't load funding rules: " + e.message); }
+}
+settingsTab.addEventListener("click", () => loadFundingRules());
+document.getElementById("frSave").addEventListener("click", async () => {
+  const body = { stocks_text: document.getElementById("fr_stocks").value };
+  FR_FIELDS.forEach(k => { body[k] = document.getElementById("fr_" + k).value; });
+  try { const d = await settingsCall("/api/funding/rules", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    fundingInfo = d; fillFundingForm(d.rules, d.stocks_text); updateMtfHint(); showFr(true, "Saved."); }
+  catch (e) { showFr(false, e.message); }
+});
+document.getElementById("frReset").addEventListener("click", async () => {
+  if (!confirm("Reset all funding rules to the defaults? Your per-stock list will be cleared.")) return;
+  try { const d = await settingsCall("/api/funding/rules", { method: "DELETE" });
+    fundingInfo = d; fillFundingForm(d.rules, d.stocks_text); updateMtfHint(); showFr(true, "Reset to defaults and saved."); }
+  catch (e) { showFr(false, e.message); }
+});
+
+
+/* ================= Settings: NSE connection test ================= */
+document.getElementById("nseTest").addEventListener("click", async () => {
+  const btn = document.getElementById("nseTest"), out = document.getElementById("nseResult");
+  btn.disabled = true; out.innerHTML = '<div class="result-msg ok">Testing both servers… this can take up to a minute if NSE is slow.</div>';
+  try {
+    const d = await settingsCall("/api/nse/status");
+    const names = { bhavcopy: "Bhavcopy (EOD)", cm: "CM market data" };
+    const all = Object.values(d).every(x => x.ok);
+    out.innerHTML = `<div class="result-msg ${all ? "ok" : "bad"}">${Object.entries(d).map(([k, x]) => x.ok
+      ? `<div>${names[k] || k}: <b>working</b>, replied in ${(x.ms / 1000).toFixed(1)}s (${x.tools} tools)</div>`
+      : `<div>${names[k] || k}: <b>not working</b> after ${(x.ms / 1000).toFixed(0)}s. ${escapeHtml(x.error)}</div>`).join("")}
+      ${all ? "" : `<div style="margin-top:6px">This is on NSE's side. Wait a few minutes and test again, or run <code>python nse_mcp_watch.py</code>, which retries and beeps when a server answers.</div>`}</div>`;
+  } catch (e) { out.innerHTML = `<div class="result-msg bad">${escapeHtml(e.message)}</div>`; }
+  finally { btn.disabled = false; }
+});
+
+/* ================= Live prices ================= */
+const liveTab = document.querySelector('.tab[data-view="live"]');
+const liveInput = document.getElementById("liveSymbols");
+let liveTimer = null, liveBusy = false, liveLast = null;
+try { liveInput.value = localStorage.getItem("liveSymbols") || ""; } catch (e) {}
+fetch("/api/prefs").then(r => r.ok ? r.json() : null).then(p => { if (p && typeof p.live_symbols === "string") { window._savedLive = p.live_symbols; liveInput.value = p.live_symbols; try { localStorage.setItem("liveSymbols", p.live_symbols); } catch (e) {} } }).catch(() => {});
+
+const liveActive = () => document.getElementById("view-live").classList.contains("active") && !document.hidden;
+const liveSyms = () => [...new Set(liveInput.value.split(/[,\s]+/).map(x => x.trim().toUpperCase()).filter(Boolean))].slice(0, 20);
+const fmtAge = sec => sec == null ? "—" : sec < 90 ? `${sec}s ago` : sec < 5400 ? `${Math.round(sec / 60)} min ago` : sec < 172800 ? `${(sec / 3600).toFixed(1)} h ago` : `${Math.round(sec / 86400)} days ago`;
+const fmtVol = v => v == null ? "—" : v >= 1e7 ? (v / 1e7).toFixed(2) + " Cr" : v >= 1e5 ? (v / 1e5).toFixed(2) + " L" : Number(v).toLocaleString("en-IN");
+
+function scheduleLive() {
+  clearInterval(liveTimer);
+  const every = +document.getElementById("liveEvery").value;
+  if (every > 0) liveTimer = setInterval(() => { if (liveActive() && (liveSyms().length || moversOn())) liveRefresh(); }, every * 1000);
+}
+liveTab.addEventListener("click", () => { scheduleLive(); if ((liveSyms().length || moversOn()) && (!liveLast || Date.now() - liveLast > 30000)) liveRefresh(); });
+document.addEventListener("visibilitychange", () => { if (liveActive() && (liveSyms().length || moversOn()) && Date.now() - (liveLast || 0) > 30000) liveRefresh(); });
+document.getElementById("liveEvery").addEventListener("change", scheduleLive);
+document.getElementById("liveNow").addEventListener("click", () => liveRefresh());
+liveInput.addEventListener("keydown", e => { if (e.key === "Enter") liveRefresh(); });
+document.getElementById("liveFromPortfolio").addEventListener("click", () => {
+  const syms = [...stockRows.querySelectorAll(".stockSymbol")].map(i => i.dataset.resolved).filter(Boolean);
+  if (!syms.length) { document.getElementById("liveStatus").textContent = "No resolved stocks in Portfolio analysis yet."; return; }
+  liveInput.value = [...new Set(syms)].join(", "); liveRefresh();
+});
+document.getElementById("liveFromEval").addEventListener("click", async () => {
+  if (!evalEntries.length) { try { await loadEvalList(); } catch (e) {} }
+  const syms = [...new Set(evalEntries.map(e => e.symbol))];
+  if (!syms.length) { document.getElementById("liveStatus").textContent = "The Evaluation list is empty."; return; }
+  liveInput.value = syms.slice(0, 20).join(", "); liveRefresh();
+});
+
+const moversOn = () => document.getElementById("moversOn").checked;
+async function liveRefresh() {
+  if (liveBusy) return;
+  const syms = liveSyms(), st = document.getElementById("liveStatus"), btn = document.getElementById("liveNow");
+  if (!syms.length && !moversOn()) { st.textContent = "Enter at least one symbol, or turn on top movers."; st.className = "status error"; return; }
+  try { localStorage.setItem("liveSymbols", syms.join(", ")); } catch (e) {}
+  if (window._savedLive !== syms.join(", ")) { window._savedLive = syms.join(", "); fetch("/api/prefs", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ live_symbols: window._savedLive }) }).catch(() => {}); }
+  liveBusy = true; btn.disabled = true; st.className = "status"; st.textContent = "Fetching…";
+  const errors = []; let stamp = null;
+  const jobs = [];
+  if (syms.length) jobs.push((async () => {
+    const res = await fetch("/api/live?symbols=" + encodeURIComponent(syms.join(",")));
+    const d = await res.json();
+    if (!res.ok) throw new Error(typeof d.detail === "string" ? d.detail : res.statusText);
+    renderLive(d); stamp = d.fetched_at;
+  })().catch(e => errors.push("Live prices: " + e.message)));
+  if (moversOn()) jobs.push((async () => {
+    const res = await fetch(`/api/movers?limit=${document.getElementById("moversLimit").value}&index=${encodeURIComponent(document.getElementById("moversIndex").value)}`);
+    const d = await res.json();
+    if (!res.ok) throw new Error(typeof d.detail === "string" ? d.detail : res.statusText);
+    renderMovers(d); stamp = stamp || d.fetched_at;
+  })().catch(e => { errors.push("Top movers: " + e.message); document.getElementById("liveMovers").innerHTML = ""; }));
+  if (!moversOn()) document.getElementById("liveMovers").innerHTML = "";
+  await Promise.all(jobs);
+  liveLast = Date.now(); liveBusy = false; btn.disabled = false;
+  if (errors.length) { st.textContent = errors.join(" | "); st.className = "status error"; }
+  else st.textContent = "Updated " + stamp + " IST";
+}
+
+function renderMovers(d) {
+  const table = (rows, title, cls) => `<div class="panel" style="padding:8px 10px;margin-bottom:12px"><h2 style="margin:4px 4px 6px">${title}</h2><div class="result-scroll"><table class="compact"><thead><tr><th>Stock</th><th class="r">Price</th><th class="r">Change</th><th class="r">Volume</th><th class="r" title="As returned by the server; it appears to be in rupees lakh (checked against price x quantity)">Turnover (₹ L)</th></tr></thead><tbody>${
+    rows.length ? rows.map(r => `<tr><td><a href="#" class="addwatch" data-sym="${escapeHtml(r.symbol)}" title="Add to watch list"><b>${escapeHtml(r.symbol)}</b></a>${r.series && r.series !== "EQ" ? ` <span class="hint" style="margin:0">${escapeHtml(r.series)}</span>` : ""}</td><td class="r">${rupee(r.ltp, 2)}</td>
+      <td class="r"><span class="${cls}">${r.pct_change >= 0 ? "+" : "−"}${Math.abs(r.pct_change ?? 0).toFixed(2)}%</span>${r.change != null ? ` <span class="hint" style="margin:0">${r.change >= 0 ? "+" : "−"}${Math.abs(r.change).toFixed(2)}</span>` : ""}</td>
+      <td class="r">${fmtVol(r.volume)}</td><td class="r">${r.turnover != null ? Number(r.turnover).toLocaleString("en-IN", { maximumFractionDigits: 0 }) : "—"}</td></tr>`).join("")
+    : `<tr><td colspan="5" style="text-align:left;color:var(--muted)">None returned.</td></tr>`}</tbody></table></div></div>`;
+  const el = document.getElementById("liveMovers");
+  el.innerHTML = `<h2 style="margin:0 0 8px">Top movers: ${escapeHtml(d.index)}</h2>${d.market.state !== "open" ? `<p class="caveat" style="margin:0 0 8px">The market is closed (${escapeHtml(d.market.why)}), so this shows the last session's movers.</p>` : ""}
+    <div class="grid-2" style="gap:12px">${table(d.gainers, "Top gainers", "pos")}${table(d.losers, "Top losers", "neg")}</div>
+    <div class="hint" style="margin:-4px 0 14px">Source: CM market data server (nse_get_market_movers). Large moves can come from corporate actions or thin trading, not news. Information only, not investment advice.</div>`;
+  el.querySelectorAll(".addwatch").forEach(a => a.addEventListener("click", ev => {
+    ev.preventDefault();
+    const cur = liveSyms(); if (!cur.includes(a.dataset.sym) && cur.length < 20) { cur.push(a.dataset.sym); liveInput.value = cur.join(", "); liveRefresh(); }
+  }));
+}
+
+function renderLive(d) {
+  const m = d.market, ok = d.quotes.filter(q => !q.error);
+  const ages = ok.map(q => q.age_seconds).filter(a => a != null);
+  const stale = m.state === "open" && ages.length && Math.min(...ages) > 300;
+  const src = d.source || {};
+  const srcAges = Object.values(src).flatMap(x => (x.entries || []).map(e => e.age_seconds));
+  const crawl = srcAges.length ? Math.min(...srcAges) : null;
+  const srcNames = { gainers_losers: "Gainers and losers feed (cm_get_data_status)", all_stocks: "All-stock quotes feed (cm_get_allstocks_status)" };
+  document.getElementById("liveBar").innerHTML = `<div class="summary-cards compact" style="margin-bottom:12px">
+    <div class="summary-card"><div class="label">Market (by time of day)</div><div class="value ${m.state === "open" ? "pos" : ""}">${m.state === "open" ? "Open" : m.state === "pre-open" ? "Pre-open" : "Closed"}</div><div class="hint" style="margin:2px 0 0" title="${escapeHtml(m.note)}">${escapeHtml(m.why)}</div></div>
+    <div class="summary-card"><div class="label">Time in India</div><div class="value" style="font-size:14px">${escapeHtml(m.now_ist)}</div></div>
+    <div class="summary-card"><div class="label">Freshest quote</div><div class="value" style="font-size:14px">${ages.length ? fmtAge(Math.min(...ages)) : "—"}</div></div>
+    <div class="summary-card"><div class="label">Source last crawled NSE</div><div class="value" style="font-size:14px">${crawl != null ? fmtAge(crawl) : "unknown"}</div><div class="hint" style="margin:2px 0 0">from cm_get_data_status</div></div></div>
+    ${m.state !== "open" ? `<p class="caveat" style="margin:0 0 10px">The market is closed (${escapeHtml(m.why)}), so prices won't move and show the last trade. ${escapeHtml(m.note)}</p>` : ""}
+    ${stale ? `<p class="caveat warn" style="margin:0 0 10px">The market should be open, but the freshest quote is over 5 minutes old. The feed may be delayed, or today may be a trading holiday.</p>` : ""}`;
+
+  document.getElementById("liveTable").innerHTML = `<div class="panel" style="padding:8px 10px"><div class="result-scroll"><table class="compact"><thead><tr>
+    <th>Stock</th><th class="r">Live price</th><th class="r">Change</th><th class="r">Day low – high</th><th class="r">Last close</th><th class="r">vs last close</th><th class="r">Volume</th><th class="r">52-week position</th><th>Updated</th></tr></thead><tbody>${
+    d.quotes.map(q => {
+      if (q.error) return `<tr><td><b>${escapeHtml(q.symbol)}</b></td><td colspan="8" style="color:var(--danger);text-align:left">${escapeHtml(q.error)}</td></tr>`;
+      const vsClose = q.ltp != null && q.eod_close ? Math.round((q.ltp / q.eod_close - 1) * 10000) / 100 : null;
+      const pos = q.high_52w && q.low_52w && q.high_52w > q.low_52w && q.ltp != null ? Math.round((q.ltp - q.low_52w) / (q.high_52w - q.low_52w) * 100) : null;
+      return `<tr><td><b>${escapeHtml(q.symbol)}</b>${q.series && q.series !== "EQ" ? ` <span class="hint" style="margin:0">${escapeHtml(q.series)}</span>` : ""}</td>
+        <td class="r"><b>${q.ltp != null ? rupee(q.ltp, 2) : "—"}</b></td>
+        <td class="r">${q.change != null ? `<span class="${q.change >= 0 ? "pos" : "neg"}">${q.change >= 0 ? "+" : "−"}${Math.abs(q.change).toFixed(2)}${q.pct_change != null ? ` (${q.pct_change >= 0 ? "+" : "−"}${Math.abs(q.pct_change).toFixed(2)}%)` : ""}</span>` : "—"}</td>
+        <td class="r">${q.low != null && q.high != null ? `${rupee(q.low, 2)} – ${rupee(q.high, 2)}` : "—"}</td>
+        <td class="r">${q.eod_close != null ? rupee(q.eod_close, 2) + ` <span class="hint" style="margin:0">${q.eod_date ? shortDate(q.eod_date) : ""}</span>` : "—"}</td>
+        <td class="r">${vsClose != null ? signedPct(vsClose) : "—"}</td>
+        <td class="r">${fmtVol(q.volume)}</td>
+        <td class="r">${pos != null ? pos + "%" : "—"}</td>
+        <td title="${escapeHtml(q.updated || "")}">${fmtAge(q.age_seconds)}</td></tr>`; }).join("")}</tbody></table></div>
+    <div class="hint">Live price: CM market data server. Last close: Bhavcopy (end of day). "vs last close" compares the two. The 52-week position is the live price within the 52-week range given with the quote. Information only, not investment advice.</div></div>`;
+
+  const first = ok[0];
+  const statusHtml = `<details class="trades" style="margin-bottom:8px"><summary>Data source status</summary>${Object.entries(src).map(([k, x]) => `<div style="margin:8px 0"><b>${escapeHtml(srcNames[k] || k)}</b>${x.error ? `<div class="neg" style="font-size:13px">${escapeHtml(x.error)}</div>`
+    : (x.entries.length ? `<ul class="signal-reasons">${x.entries.map(e => `<li>${escapeHtml(e.label)}: ${escapeHtml(e.when)} IST (${fmtAge(e.age_seconds)})</li>`).join("")}</ul>` : `<div class="hint">No timestamp found in the response. Raw data below.</div>`)}
+    ${x.raw ? `<pre>${escapeHtml(JSON.stringify(x.raw, null, 2))}</pre>` : ""}</div>`).join("")}</details>`;
+  document.getElementById("liveRaw").innerHTML = statusHtml + (first ? `<details class="trades"><summary>Show the raw response for ${escapeHtml(first.symbol)}</summary><pre>${escapeHtml(JSON.stringify(first.raw, null, 2))}</pre><div class="hint">If a column above shows a dash but the raw data has the value under another name, send me this and I'll map it.</div></details>` : "");
+}
+
+renderRecommendPanel();
+</script>
+
+<script src="/agent-widget.js" data-title="Market assistant" data-accent="#5b8def" data-settings="true" defer></script>
+</body>
+</html>

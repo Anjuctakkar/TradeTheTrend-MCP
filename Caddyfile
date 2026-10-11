@@ -1,0 +1,5 @@
+{$DOMAIN} {
+	encode gzip zstd
+	# Caddy sets X-Forwarded-For to the visitor's address, which the app uses for rate limits.
+	reverse_proxy app:8000
+}

@@ -1,0 +1,22 @@
+[Unit]
+Description=NSE dashboard
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+User=nse
+Group=nse
+WorkingDirectory=/opt/nse-dashboard
+EnvironmentFile=/opt/nse-dashboard/.env
+Environment=DASHBOARD_PUBLIC=1
+Environment=DASHBOARD_COOKIE_SECURE=1
+Environment=DASHBOARD_DATA_DIR=/opt/nse-dashboard/data
+ExecStart=/opt/nse-dashboard/.venv/bin/python -m uvicorn server:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
