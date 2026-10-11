@@ -47,7 +47,6 @@ import holding
 import nse_cache
 import recommend
 import technical
-import tracker
 
 app = FastAPI(title="NSE MCP Dashboard",
               docs_url=None if auth.PUBLIC else "/docs", redoc_url=None if auth.PUBLIC else "/redoc",
@@ -900,40 +899,19 @@ async def _recommend_inner(req: RecommendRequest, user: dict):
                                  "reasoning": [f"The 12 months of history needed for the 52-week range and holding period couldn't be loaded ({_describe_error(exc)})."]}
 
         await asyncio.gather(*(enrich(p) for p in result.get("picks", [])))
-        logged = await tracker.add_items(result.get("picks", []), "system", user["id"])
-        result["logged"], result["logged_ids"] = logged["added"], logged["ids"]
         return result
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"Recommendation failed: {_describe_error(exc)}")
 
 
 # ---------------------------------------------------------------------------
-# Evaluation: backtest + forward track record of logged suggestions
+# Evaluation: backtest, and the forward check of the list the user keeps on their own computer
 # ---------------------------------------------------------------------------
 class BacktestRequest(BaseModel):
     symbols: list[str]
     months: int = 12
     max_hold: int = 20
     cost_pct: float = 0.2
-
-
-class TakenRequest(BaseModel):
-    taken: bool
-
-
-class TrackItem(BaseModel):
-    symbol: str
-    as_of: str
-    entry: Optional[float] = None
-    stop_loss: Optional[float] = None
-    target: Optional[float] = None
-    score: Optional[str] = None
-    hold_days: Optional[int] = None
-
-
-class TrackAddRequest(BaseModel):
-    source: str = "user"
-    items: list[TrackItem]
 
 
 @app.post("/api/backtest")
@@ -963,55 +941,61 @@ async def run_backtest(req: BacktestRequest):
             "results": results, "pooled": backtest.pool(ok) if ok else None}
 
 
-def _has_levels(e: dict[str, Any]) -> bool:
-    return all(e.get(k) is not None for k in ("entry", "stop_loss", "target"))
+MAX_EVAL_ENTRIES = 300
 
 
-@app.post("/api/track/add")
-async def track_add(req: TrackAddRequest, user: dict = Depends(auth.current_user)):
-    """Add stocks to the evaluation list. A stock without entry/stop/target (no LONG
-    setup right now) is kept as watch-only: it can be backtested but has no outcome to track."""
-    if req.source not in ("user", "system"):
-        raise HTTPException(400, "source must be 'user' or 'system'.")
-    items: list[dict[str, Any]] = []
-    for it in req.items[:30]:
-        sym = it.symbol.strip().upper()
+class EvalEntry(BaseModel):
+    """One entry of the user's evaluation list, sent from their browser. Nothing here is stored."""
+    id: str
+    symbol: str
+    as_of: str
+    entry: float
+    stop_loss: float
+    target: float
+    source: str = "user"
+    hold_days: Optional[int] = None
+    taken: bool = False
+    score: Optional[str] = None
+    logged_at: Optional[str] = None
+
+
+class EvaluateRequest(BaseModel):
+    entries: list[EvalEntry]
+    max_hold: int = 20
+    cost_pct: float = 0.2
+
+
+@app.post("/api/track/evaluate")
+async def track_evaluate(req: EvaluateRequest, user: dict = Depends(auth.current_user)):
+    """How each entry on the user's evaluation list has played out since it was added.
+
+    The list lives in the user's own browser (and, if they choose, a JSON file on their computer). The
+    browser sends it here, prices are checked against the shared NSE data, and the results go straight
+    back: the server stores nothing. Only entries with entry/stop/target levels are sent."""
+    if len(req.entries) > MAX_EVAL_ENTRIES:
+        raise HTTPException(400, f"Send at most {MAX_EVAL_ENTRIES} stocks at a time.")
+    entries: list[dict[str, Any]] = []
+    for e in req.entries:
+        sym = e.symbol.strip().upper()
         if not (1 <= len(sym) <= 20 and all(ch.isalnum() or ch in "-&_" for ch in sym)):
-            raise HTTPException(400, f"'{it.symbol}' doesn't look like an NSE symbol.")
+            raise HTTPException(400, f"'{e.symbol}' doesn't look like an NSE symbol.")
         try:
-            dt.date.fromisoformat(it.as_of[:10])
+            dt.date.fromisoformat(e.as_of[:10])
         except ValueError:
             raise HTTPException(400, f"Bad date for {sym}.")
-        levels = (it.entry, it.stop_loss, it.target)
-        if any(v is not None for v in levels):
-            if any(v is None for v in levels) or not (0 < it.stop_loss < it.entry < it.target):
-                raise HTTPException(400, f"{sym}: need 0 < stop < entry < target.")
-        items.append({**it.model_dump(), "symbol": sym, "as_of": it.as_of[:10]})
-    return await tracker.add_items(items, req.source, user["id"])
-
-
-@app.get("/api/track/list")
-async def track_list(user: dict = Depends(auth.current_user)):
-    """The evaluation list without outcomes (fast: no NSE calls)."""
-    entries = await tracker.list_entries(user["id"])
-    entries.sort(key=lambda r: (r["as_of"], r["symbol"]), reverse=True)
-    return {"entries": entries}
-
-
-@app.get("/api/track")
-async def track(user: dict = Depends(auth.current_user), max_hold: int = 20, cost_pct: float = 0.2):
-    """Re-evaluate every listed stock that has trade levels against prices since it was added."""
-    url = _server_url(ANALYSIS_SERVER)
-    entries = await tracker.list_entries(user["id"])
-    empty = backtest.summarize_forward([])
+        if not (0 < e.stop_loss < e.entry < e.target):
+            raise HTTPException(400, f"{sym}: need 0 < stop < entry < target.")
+        if len(e.id) > 40:
+            raise HTTPException(400, "An entry id is too long.")
+        entries.append({**e.model_dump(), "symbol": sym, "as_of": e.as_of[:10]})
     if not entries:
-        return {"entries": [], "summaries": {"all": empty, "user": empty, "system": empty, "taken": empty}}
+        return {"entries": []}
 
+    url = _server_url(ANALYSIS_SERVER)
     today = dt.date.today()
     by_symbol: dict[str, list[dict[str, Any]]] = {}
     for e in entries:
-        if _has_levels(e):
-            by_symbol.setdefault(e["symbol"], []).append(e)
+        by_symbol.setdefault(e["symbol"], []).append(e)
     sem = asyncio.Semaphore(ANALYSIS_CONCURRENCY)
 
     async def history(sym: str, group: list[dict[str, Any]]):
@@ -1023,45 +1007,21 @@ async def track(user: dict = Depends(auth.current_user), max_hold: int = 20, cos
             except Exception as exc:  # noqa: BLE001
                 return sym, None, _describe_error(exc)
 
-    hist = {sym: (recs, err) for sym, recs, err in await asyncio.gather(
-        *(history(s, g) for s, g in by_symbol.items()))}
+    max_hold = max(2, min(req.max_hold, 120))
+    cost = max(0.0, min(req.cost_pct, 5.0))
+    async with heavy_slot():
+        hist = {sym: (recs, err) for sym, recs, err in await asyncio.gather(*(history(s, g) for s, g in by_symbol.items()))}
 
     rows = []
     for e in entries:
-        e = {**e, "source": e.get("source", "system")}
-        if not _has_levels(e):
-            ev = {"status": "no_setup"}
+        recs, err = hist[e["symbol"]]
+        if not recs:
+            ev = {"status": "no_data", "error": err}
         else:
-            recs, err = hist[e["symbol"]]
-            if not recs:
-                ev = {"status": "no_data", "error": err}
-            else:
-                ev = backtest.evaluate_forward(recs, e["as_of"], e["entry"], e["stop_loss"], e["target"],
-                                               max(2, min(e.get("hold_days") or max_hold, 120)), cost_pct)
+            ev = backtest.evaluate_forward(recs, e["as_of"], e["entry"], e["stop_loss"], e["target"],
+                                           max(2, min(e.get("hold_days") or max_hold, 120)), cost)
         rows.append({**e, **ev})
-    rows.sort(key=lambda r: (r["as_of"], r["symbol"]), reverse=True)
-    tracked = [r for r in rows if r["status"] != "no_setup"]
-    summaries = {
-        "all": backtest.summarize_forward(tracked),
-        "user": backtest.summarize_forward([r for r in tracked if r["source"] == "user"]),
-        "system": backtest.summarize_forward([r for r in tracked if r["source"] == "system"]),
-        "taken": backtest.summarize_forward([r for r in tracked if r.get("taken")]),
-    }
-    return {"entries": rows, "summaries": summaries}
-
-
-@app.post("/api/track/{entry_id}/taken")
-async def track_taken(entry_id: str, req: TakenRequest, user: dict = Depends(auth.current_user)):
-    if not await tracker.set_taken(entry_id, req.taken, user["id"]):
-        raise HTTPException(404, "Suggestion not found.")
-    return {"ok": True}
-
-
-@app.delete("/api/track/{entry_id}")
-async def track_delete(entry_id: str, user: dict = Depends(auth.current_user)):
-    if not await tracker.delete(entry_id, user["id"]):
-        raise HTTPException(404, "Suggestion not found.")
-    return {"ok": True}
+    return {"entries": rows}
 
 
 # Optional add-on: the chat assistant widget (needs anthropic + ANTHROPIC_API_KEY).

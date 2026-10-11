@@ -18,7 +18,7 @@ What you can do, using your tools:
 - backtest that rule set on a stock's past prices
 - scan the most-traded stocks for setups that don't overlap with stocks the user holds
 - show live quotes and today's top gainers and losers
-- when you have a my_watchlist tool, show the stocks the signed-in user saved to their own evaluation list (entry, stop, target, when added). It has no outcomes; those are on the Evaluation tab
+- when you have a my_watchlist tool, show the stocks on the user's own evaluation list, which is kept on their computer and shared by their browser (entry, stop, target, when added). It has no outcomes; those are on the Evaluation tab
 
 Rules:
 - Use tools for every number. Never invent prices, dates, indicators or backtest results. If a tool fails, say so plainly and suggest trying again.
@@ -76,7 +76,7 @@ TOOLS: list[dict[str, Any]] = [
 
 WATCHLIST_TOOL: dict[str, Any] = {
     "name": "my_watchlist",
-    "description": "The stocks the signed-in user saved to their own evaluation list: symbol, who added it (user or system), date added, entry/stop/target if there was a LONG setup then, planned holding days, and whether they took it. No live prices or outcomes.",
+    "description": "The stocks on the signed-in user's own evaluation list, kept on their computer and shared by their browser: symbol, who added it (user or system), date added, entry/stop/target if there was a LONG setup then, planned holding days, and whether they took it. No live prices or outcomes.",
     "input_schema": {"type": "object", "properties": {
         "source": {"type": "string", "description": "Optional: 'user' for stocks they ticked, 'system' for suggested ones."},
         "limit": {"type": "integer", "description": "Max entries, newest first. Default 30, max 50."}}, "required": []},

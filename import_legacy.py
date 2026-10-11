@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""One-time import of the old single-owner files into one user's account.
+"""One-time import of your old funding rules into one user's account.
 
     python import_legacy.py you@gmail.com
 
-Reads suggestions_log.json and funding_rules.json from the data folder (DASHBOARD_DATA_DIR, or next to the
-code) and stores them under that user. If the user hasn't signed in yet, a placeholder account is created and
-is picked up by email when they first sign in with Google. Safe to run twice: entries already imported are skipped.
-Nobody else gets this history: new users always start empty.
+Reads funding_rules.json from the data folder (DASHBOARD_DATA_DIR, or next to the code) and stores it under
+that user. If the user hasn't signed in yet, a placeholder account is created and picked up by email when
+they first sign in with Google. Safe to run twice.
+
+Your old EVALUATION list (suggestions_log.json) is no longer stored on the server. Open the app, go to the
+Evaluation tab, choose "Open my file" and pick that file: it is read in your browser and kept on your computer.
 """
-import asyncio
 import json
 import sys
 from pathlib import Path
@@ -22,7 +23,6 @@ import auth  # noqa: E402
 import config  # noqa: E402
 import db  # noqa: E402
 import funding  # noqa: E402
-import tracker  # noqa: E402
 import user_store  # noqa: E402
 
 
@@ -37,17 +37,8 @@ def main(email: str) -> None:
             s.commit()
         uid = u.id
 
-    log = config.DATA_DIR / "suggestions_log.json"
-    if log.exists():
-        rows = json.loads(log.read_text(encoding="utf-8"))
-        added = 0
-        for source in ("user", "system"):
-            items = [r for r in rows if r.get("source", "system") == source]
-            if items:
-                added += asyncio.run(tracker.add_items(items, source, uid))["added"]
-        print(f"Watchlist: {added} of {len(rows)} entries imported.")
-    else:
-        print("No suggestions_log.json found; skipped.")
+    if (config.DATA_DIR / "suggestions_log.json").exists():
+        print("suggestions_log.json found: it is not imported here. In the app, Evaluation tab > Open my file, and choose it.")
 
     rules_file = config.DATA_DIR / "funding_rules.json"
     if rules_file.exists():

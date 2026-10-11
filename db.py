@@ -3,9 +3,12 @@
 SQLite file next to the app for local use; Postgres when DATABASE_URL is set
 (Render's postgres:// URLs are rewritten for the psycopg 3 driver).
 
-Tables: users, watchlist_entries (each user's own evaluation list / track record) and
-user_settings (each user's funding rules and preferences) chat_calls (the assistant quota log) and nse_cache (shared market data). Every per-user table carries a
-user_id and every query on it must filter by that id.
+Tables: users (who may sign in), user_settings (each user's funding rules and preferences), chat_calls
+(the assistant quota and token log) and nse_cache (shared market data).
+
+The Evaluation list and the suggestions it receives are NOT stored here: they live on each user's own
+computer (see static/eval-store.js). Every per-user table carries a user_id, and every query on it must
+filter by that id.
 """
 import datetime as dt
 import os
@@ -58,25 +61,6 @@ class User(Base):
     session_version: Mapped[int] = mapped_column(Integer, default=1)       # bump to sign this user out everywhere
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
     last_login_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
-class WatchlistEntry(Base):
-    """One stock on a user's evaluation list. Levels are null for a watch-only stock (no LONG setup)."""
-    __tablename__ = "watchlist_entries"
-    __table_args__ = (UniqueConstraint("user_id", "symbol", "as_of", "source", name="uq_watchlist_user_symbol_asof_source"),)
-
-    id: Mapped[str] = mapped_column(String(16), primary_key=True)
-    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    symbol: Mapped[str] = mapped_column(String(20))
-    source: Mapped[str] = mapped_column(String(10))                       # "user" or "system"
-    as_of: Mapped[str] = mapped_column(String(10))                        # YYYY-MM-DD
-    entry: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    stop_loss: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    target: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    score: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
-    hold_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    logged_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
-    taken: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class UserSettings(Base):

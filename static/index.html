@@ -207,6 +207,11 @@
   <div class="layout">
     <aside class="sidebar">
       <div class="side-section">
+        <h2>Your saved list</h2>
+        <div class="hint" style="margin-top:0">Your Evaluation list, including suggestions, is stored on <b>this computer</b>, never on the server, and loads every time you open the app. A browser can clear its storage, so keep a file copy too.</div>
+        <div class="hint" id="evalStorageBox" style="color:var(--text)">Loading…</div>
+      </div>
+      <div class="side-section">
         <h2>Backtest</h2>
         <div class="hint" style="margin-top:0">Tick stocks in the list, then run. Stocks you ticked <b>Eval</b> on in Portfolio analysis are already ticked.</div>
         <label for="btMonths">History</label>
@@ -386,6 +391,7 @@
   </div>
 </section>
 
+<script src="/eval-store.js"></script>
 <script>
 /* ---------- sign-in: send people back to the login page when the session ends ---------- */
 (() => {
@@ -741,10 +747,15 @@ function renderRecommendPanel() {
       const d = await res.json();
       if (!res.ok) throw new Error(d.detail || res.statusText);
       st.textContent = `Scanned ${d.scanned}, ${d.longs_found} long setup(s).` + (d.note ? " " + d.note : "");
-      if (d.picks.length) out.innerHTML = `<div class="panel"><h2>Suggested additions</h2><div class="result-scroll"><table><thead><tr><th>Symbol</th><th>Score</th><th>RSI</th><th>Corr. to portfolio</th><th>Entry</th><th>Stop</th><th>Target</th><th>Hold</th><th>52w low</th><th>52w high</th><th>Qty</th><th>Invested</th></tr></thead><tbody>${d.picks.map(p => `<tr><td>${escapeHtml(p.symbol)}</td><td>${p.score}</td><td>${p.rsi}</td><td>${p.correlation ?? "—"}</td><td>₹${p.entry}</td><td>₹${p.stop_loss}</td><td>₹${p.target}</td><td>${holdShort(p.hold)}</td><td>${p.week52?.status === "ok" ? fmtMoney(p.week52.low) : "—"}</td><td>${p.week52?.status === "ok" ? fmtMoney(p.week52.high) : "—"}</td><td>${p.quantity}</td><td>₹${p.invested.toLocaleString("en-IN")}</td></tr>`).join("")}</tbody></table></div><details class="trades"><summary>Why these holding periods</summary>${d.picks.map(p => `<div style="margin:8px 0"><b>${escapeHtml(p.symbol)}</b>: ${p.hold?.status === "proposed" ? "about " + p.hold.days + " trading days" : "none proposed"}<ul class="signal-reasons">${(p.hold?.reasoning || []).map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul></div>`).join("")}</details><button class="linkish btPicks" style="width:auto;padding:8px 14px">Backtest these picks</button><div class="hint">These are added to Evaluation as System picks so you can check how they play out.</div></div>`;
+      let savedIds = [];
+      if (d.picks.length) {
+        await evalReady;
+        savedIds = evalStore.add(d.picks.map(p => ({ symbol: p.symbol, as_of: String(p.as_of).slice(0, 10), entry: p.entry, stop_loss: p.stop_loss, target: p.target, score: p.score, hold_days: p.hold_days ?? null })), "system").ids;
+      }
+      if (d.picks.length) out.innerHTML = `<div class="panel"><h2>Suggested additions</h2><div class="result-scroll"><table><thead><tr><th>Symbol</th><th>Score</th><th>RSI</th><th>Corr. to portfolio</th><th>Entry</th><th>Stop</th><th>Target</th><th>Hold</th><th>52w low</th><th>52w high</th><th>Qty</th><th>Invested</th></tr></thead><tbody>${d.picks.map(p => `<tr><td>${escapeHtml(p.symbol)}</td><td>${p.score}</td><td>${p.rsi}</td><td>${p.correlation ?? "—"}</td><td>₹${p.entry}</td><td>₹${p.stop_loss}</td><td>₹${p.target}</td><td>${holdShort(p.hold)}</td><td>${p.week52?.status === "ok" ? fmtMoney(p.week52.low) : "—"}</td><td>${p.week52?.status === "ok" ? fmtMoney(p.week52.high) : "—"}</td><td>${p.quantity}</td><td>₹${p.invested.toLocaleString("en-IN")}</td></tr>`).join("")}</tbody></table></div><details class="trades"><summary>Why these holding periods</summary>${d.picks.map(p => `<div style="margin:8px 0"><b>${escapeHtml(p.symbol)}</b>: ${p.hold?.status === "proposed" ? "about " + p.hold.days + " trading days" : "none proposed"}<ul class="signal-reasons">${(p.hold?.reasoning || []).map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul></div>`).join("")}</details><button class="linkish btPicks" style="width:auto;padding:8px 14px">Backtest these picks</button><div class="hint">These are saved to your Evaluation list as System picks, on this computer and not on the server, so you can check how they play out.</div></div>`;
       out.querySelector(".btPicks")?.addEventListener("click", () => {
         evalSelected.clear();
-        (d.logged_ids || []).forEach(id => evalSelected.add(id));
+        savedIds.forEach(id => evalSelected.add(id));
         document.querySelector('.tab[data-view="eval"]').click();
         loadEvalList().then(runBacktest);
       });
@@ -981,38 +992,88 @@ async function addTickedToEvaluation(results, inputs) {
   });
   const failed = ticked.size - items.length;
   if (!items.length) return { added: 0, already: 0, failed };
-  const res = await fetch("/api/track/add", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: "user", items }) });
-  const d = await res.json();
-  if (!res.ok) throw new Error(typeof d.detail === "string" ? d.detail : res.statusText);
-  d.ids.forEach(id => evalSelected.add(id));
-  loadEvalList().catch(() => {});
-  return { added: d.added, already: d.skipped, failed };
+  await evalReady;
+  const r = evalStore.add(items, "user");
+  r.ids.forEach(id => evalSelected.add(id));
+  return { added: r.added, already: r.already, failed };
 }
 
+/* ---- Where the Evaluation list lives: on THIS computer. Browser storage, plus an optional JSON file you choose
+        (see /eval-store.js). The server never stores it; it only checks prices when you press Refresh outcomes. ---- */
+let evalStore = null, evalFileMessage = "";
+const evalReady = (async () => {
+  let key = "local";
+  try { const r = await fetch("/api/auth/status"); const d = await r.json(); if (d.user && d.user.email) key = d.user.email; } catch (e) {}
+  evalStore = EvalStore.create({ userKey: key });
+  evalStore.onChange(() => { evalEntries = evalStore.entries(); pruneSelection(); renderEval(); renderStorageBox(); });
+  await evalStore.init();
+  evalEntries = evalStore.entries(); pruneSelection(); renderEval(); renderStorageBox();
+})();
+
+function pruneSelection() {
+  const ids = new Set(evalEntries.map(e => e.id));
+  [...evalSelected].forEach(id => { if (!ids.has(id)) evalSelected.delete(id); });
+}
+
+// The assistant can discuss your list: the page hands it to the chat widget (newest 50), nothing is stored on the server.
+window.assistantContext = () => ({ watchlist: evalEntries.slice().sort((a, b) => String(b.as_of).localeCompare(String(a.as_of))).slice(0, 50)
+  .map(e => ({ symbol: e.symbol, source: e.source, as_of: e.as_of, entry: e.entry, stop_loss: e.stop_loss, target: e.target, hold_days: e.hold_days, taken: !!e.taken })) });
+
 async function loadEvalList() {
-  try {
-    const res = await fetch("/api/track/list");
-    const d = await res.json();
-    if (!res.ok) throw new Error(d.detail || res.statusText);
-    evalEntries = d.entries;
-    const ids = new Set(evalEntries.map(e => e.id));
-    [...evalSelected].forEach(id => { if (!ids.has(id)) evalSelected.delete(id); });
-    renderEval();
-  } catch (e) { document.getElementById("trResults").innerHTML = `<div class="empty">Couldn't load the list: ${escapeHtml(e.message)}</div>`; }
+  await evalReady;
+  evalEntries = evalStore.entries(); pruneSelection(); renderEval(); renderStorageBox();
 }
 
 async function refreshOutcomes() {
   const st = document.getElementById("trStatus"), btn = document.getElementById("trRefresh");
+  await evalReady;
+  const withLevels = evalEntries.filter(e => e.entry != null && e.stop_loss != null && e.target != null)
+    .sort((a, b) => String(b.as_of).localeCompare(String(a.as_of))).slice(0, 300);
+  evalEntries.filter(e => e.entry == null).forEach(e => { evalOutcome[e.id] = { status: "no_setup" }; });
+  if (!withLevels.length) { renderEval(); st.className = "status"; st.textContent = "Nothing to check yet: none of your stocks has entry, stop and target levels."; return; }
   btn.disabled = true; st.className = "status"; st.textContent = "Checking outcomes…";
   try {
-    const res = await fetch(`/api/track?max_hold=${+document.getElementById("btHold").value || 20}&cost_pct=${parseFloat(document.getElementById("btCost").value) || 0}`);
+    const res = await fetch("/api/track/evaluate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+      entries: withLevels.map(e => ({ id: e.id, symbol: e.symbol, as_of: e.as_of, entry: e.entry, stop_loss: e.stop_loss, target: e.target,
+        source: e.source, hold_days: e.hold_days, taken: !!e.taken, score: e.score, logged_at: e.logged_at })),
+      max_hold: +document.getElementById("btHold").value || 20, cost_pct: parseFloat(document.getElementById("btCost").value) || 0 }) });
     const d = await res.json();
-    if (!res.ok) throw new Error(d.detail || res.statusText);
+    if (!res.ok) throw new Error(typeof d.detail === "string" ? d.detail : res.statusText);
     d.entries.forEach(e => { evalOutcome[e.id] = e; });
-    evalEntries = d.entries; evalChecked = new Date();
+    evalChecked = new Date();
     renderEval(); st.textContent = "Updated " + evalChecked.toLocaleTimeString("en-IN");
   } catch (e) { st.textContent = "Could not refresh: " + e.message; st.className = "status error"; }
   finally { btn.disabled = false; }
+}
+
+/* ---- the "Your saved list" box in the Evaluation sidebar ---- */
+function renderStorageBox() {
+  const box = document.getElementById("evalStorageBox");
+  if (!box || !evalStore) return;
+  const f = evalStore.fileState(), n = evalEntries.length;
+  let html;
+  if (f.linked && f.permission === "granted") html = `<span class="pos">●</span> Linked to <b>${escapeHtml(f.name)}</b>. Every change is saved to that file${f.lastWrite ? " (last at " + f.lastWrite.toLocaleTimeString("en-IN") + ")" : ""}.`;
+  else if (f.linked) html = `<span class="warn">●</span> <b>${escapeHtml(f.name)}</b> is linked, but the browser needs your permission again for this visit.`;
+  else html = `Saved in this browser: ${n} stock${n === 1 ? "" : "s"}. No file linked.`;
+  if (f.error) html += `<div class="hint warn">${escapeHtml(f.error)}</div>`;
+  if (!f.storageOk) html += `<div class="hint warn">This browser isn't keeping the list (private window or storage full). Download a copy to keep it.</div>`;
+  const btns = [];
+  if (f.linked && f.permission !== "granted") btns.push(["evReconnect", "Reconnect file"]);
+  btns.push(["evOpen", "Open my file…"]);
+  if (f.supported && !f.linked) btns.push(["evCreate", "Create a file…"]);
+  btns.push(["evDownload", "Download a copy"]);
+  if (f.linked) btns.push(["evUnlink", "Unlink file"]);
+  box.innerHTML = html + `<div class="btnrow" style="margin-top:8px">${btns.map(([id, l]) => `<button type="button" class="secondary" id="${id}">${l}</button>`).join("")}</div>` +
+    (evalFileMessage ? `<div class="hint">${escapeHtml(evalFileMessage)}</div>` : "");
+  const say = r => { evalFileMessage = r.error ? r.error : r.cancelled ? "" :
+      r.added !== undefined ? `Loaded: ${r.added} added, ${r.already} already on your list${r.skipped ? ", " + r.skipped + " skipped as invalid" : ""}.` :
+      r.linked ? "Linked to " + r.linked + "." : ""; renderStorageBox(); };
+  const on = (id, fn) => { const b = box.querySelector("#" + id); if (b) b.addEventListener("click", fn); };
+  on("evReconnect", async () => say(await evalStore.reconnect()));
+  on("evOpen", async () => say(await evalStore.openFile()));
+  on("evCreate", async () => say(await evalStore.createFile()));
+  on("evDownload", () => evalStore.download());
+  on("evUnlink", async () => { await evalStore.unlink(); evalFileMessage = "File unlinked. Your list is still kept in this browser."; renderStorageBox(); });
 }
 
 function summarize(rows) {
@@ -1079,16 +1140,13 @@ function renderEval() {
   all.checked = shown.length > 0 && shown.every(r => evalSelected.has(r.id));
   all.addEventListener("change", () => { shown.forEach(r => all.checked ? evalSelected.add(r.id) : evalSelected.delete(r.id)); renderEval(); });
   out.querySelectorAll(".evSel").forEach(b => b.addEventListener("change", () => { b.checked ? evalSelected.add(b.dataset.id) : evalSelected.delete(b.dataset.id); updateBtLabel(); all.checked = shown.every(r => evalSelected.has(r.id)); }));
-  out.querySelectorAll(".evTaken").forEach(b => b.addEventListener("change", async () => {
-    await fetch(`/api/track/${b.dataset.id}/taken`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ taken: b.checked }) });
-    const e = evalEntries.find(x => x.id === b.dataset.id); if (e) e.taken = b.checked;
+  out.querySelectorAll(".evTaken").forEach(b => b.addEventListener("change", () => {
     if (evalOutcome[b.dataset.id]) evalOutcome[b.dataset.id].taken = b.checked;
-    renderEval();
+    evalStore.setTaken(b.dataset.id, b.checked);           // saved on this computer; the list redraws itself
   }));
-  out.querySelectorAll(".rm").forEach(b => b.addEventListener("click", async () => {
-    await fetch(`/api/track/${b.dataset.id}`, { method: "DELETE" });
-    evalEntries = evalEntries.filter(x => x.id !== b.dataset.id); delete evalOutcome[b.dataset.id]; evalSelected.delete(b.dataset.id);
-    renderEval();
+  out.querySelectorAll(".rm").forEach(b => b.addEventListener("click", () => {
+    delete evalOutcome[b.dataset.id]; evalSelected.delete(b.dataset.id);
+    evalStore.remove(b.dataset.id);
   }));
 }
 

@@ -14,7 +14,7 @@ import datetime as dt
 import os
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 
@@ -28,7 +28,7 @@ load_dotenv(ENV_PATH, encoding="utf-8-sig", override=True)
 
 from fastapi import APIRouter, HTTPException, Request  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
-from pydantic import BaseModel  # noqa: E402
+from pydantic import BaseModel, Field  # noqa: E402
 
 import agent  # noqa: E402
 
@@ -108,6 +108,8 @@ class Msg(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: list[Msg]
+    # The user's evaluation list, kept on their own computer and sent by their browser (newest 50 at most).
+    watchlist: Optional[list[Any]] = Field(default=None, max_length=200)
 
 
 def _client_ip(req: Request) -> str:
@@ -172,7 +174,7 @@ def build_router(detailed: bool) -> APIRouter:
             if _client is None:
                 from anthropic import AsyncAnthropic
                 _client = AsyncAnthropic()
-            handlers = agent_tools.handlers_for(uid) if uid is not None else agent_tools.HANDLERS
+            handlers = agent_tools.handlers_for(uid, req.watchlist) if uid is not None else agent_tools.HANDLERS
             tools = agent.TOOLS + [agent.WATCHLIST_TOOL] if uid is not None else agent.TOOLS
             reply, used, tokens = await agent.run_agent(
                 _client, model, [{"role": m.role, "content": m.content} for m in msgs], handlers, tools=tools)

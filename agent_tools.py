@@ -3,13 +3,13 @@ return compact JSON (no full price series) so the model's context stays small.""
 import asyncio
 import datetime as dt
 import functools
+import math
 from typing import Any, Optional
 
 import backtest
 import recommend
 import server as core
 import technical
-import tracker
 
 
 def _url() -> str:
@@ -100,18 +100,44 @@ HANDLERS = {
 }
 
 
-async def my_watchlist(user_id: int, source: str = "", limit: int = 30) -> dict[str, Any]:
-    """The calling user's own evaluation list. user_id is bound by handlers_for(), never supplied by the model."""
-    rows = await tracker.list_entries(user_id)
-    if source in ("user", "system"):
-        rows = [r for r in rows if r["source"] == source]
+def clean_watchlist(raw: Any) -> list[dict[str, Any]]:
+    """The evaluation list arrives from the user's browser, so it is treated as untrusted data: only known
+    fields are kept, symbols and dates are checked, numbers must be finite, and nothing free-form gets through."""
+    def number(v: Any) -> Optional[float]:
+        return round(float(v), 2) if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) else None
+
+    out: list[dict[str, Any]] = []
+    for r in (raw if isinstance(raw, list) else [])[:50]:
+        if not isinstance(r, dict):
+            continue
+        sym = str(r.get("symbol", "")).strip().upper()
+        if not (1 <= len(sym) <= 20 and all(ch.isalnum() or ch in "-&_" for ch in sym)):
+            continue
+        as_of = str(r.get("as_of", ""))[:10]
+        try:
+            dt.date.fromisoformat(as_of)
+        except ValueError:
+            continue
+        hold = r.get("hold_days")
+        out.append({"symbol": sym, "source": "system" if r.get("source") == "system" else "user", "as_of": as_of,
+                    "entry": number(r.get("entry")), "stop_loss": number(r.get("stop_loss")), "target": number(r.get("target")),
+                    "hold_days": hold if isinstance(hold, int) and not isinstance(hold, bool) and 1 <= hold <= 120 else None,
+                    "taken": r.get("taken") is True})
+    return out
+
+
+async def my_watchlist(watchlist: list[dict[str, Any]], source: str = "", limit: int = 30) -> dict[str, Any]:
+    """The evaluation list the user's own browser shared with this chat. `watchlist` is bound by handlers_for(),
+    never supplied by the model, and is already cleaned by clean_watchlist()."""
+    rows = [r for r in watchlist if source not in ("user", "system") or r["source"] == source]
     rows.sort(key=lambda r: (r["as_of"], r["symbol"]), reverse=True)
     rows = rows[:max(1, min(int(limit), 50))]
-    keep = ("symbol", "source", "as_of", "entry", "stop_loss", "target", "hold_days", "taken")
-    return {"count": len(rows), "entries": [{k: r[k] for k in keep} for r in rows],
-            "note": "Entries with no entry/stop/target had no LONG setup when added. Outcomes are on the Evaluation tab."}
+    return {"count": len(rows), "entries": rows,
+            "note": "This list is kept on the user's own computer and was shared by their browser with this question (newest 50 at most). "
+                    "Entries with no entry/stop/target had no LONG setup when added. Outcomes are on the Evaluation tab. "
+                    "If count is 0 the list is empty or was not shared."}
 
 
-def handlers_for(user_id: int) -> dict[str, Any]:
+def handlers_for(user_id: int, watchlist: Any = None) -> dict[str, Any]:
     """The tool handlers for one signed-in user: the shared ones plus their own watchlist."""
-    return {**HANDLERS, "my_watchlist": functools.partial(my_watchlist, user_id)}
+    return {**HANDLERS, "my_watchlist": functools.partial(my_watchlist, clean_watchlist(watchlist))}

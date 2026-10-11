@@ -94,7 +94,11 @@
     var typing = el("div", "typing", "Checking NSE data…"); log.appendChild(typing); log.scrollTop = log.scrollHeight;
     try {
       var res = await fetch(API + "/api/agent/chat", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: history.slice(-20) }) });
+        body: JSON.stringify(Object.assign({ messages: history.slice(-20) }, (function () {
+          // The page may share the user's own evaluation list (kept on their computer) so the assistant can discuss it.
+          try { var c = typeof window.assistantContext === "function" ? window.assistantContext() : null;
+            return c && Array.isArray(c.watchlist) ? { watchlist: c.watchlist.slice(0, 50) } : {}; } catch (e) { return {}; }
+        })())) });
       var data = await res.json().catch(function () { return {}; });
       if (!res.ok) { var err = new Error(typeof data.detail === "string" ? data.detail : "Something went wrong. Please try again."); err.code = data.code; throw err; }
       history.push({ role: "assistant", content: data.reply }); add("bot", data.reply);

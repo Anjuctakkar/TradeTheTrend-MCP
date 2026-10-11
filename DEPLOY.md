@@ -1,19 +1,20 @@
 # Deploying the NSE dashboard (multiuser)
 
 This guide takes you from the project folder to a running, invite-only service where every user signs in
-with Google and has their own watchlist, settings and assistant quota.
+with Google and has their own Evaluation list (kept on their own computer), settings and assistant quota.
 
 ## 0. What you are deploying
 
 ```
-Browser ──HTTPS──> Caddy (certificate) ──> App (FastAPI, one process) ──> Postgres (users, watchlists, settings,
+Browser ──HTTPS──> Caddy (certificate) ──> App (FastAPI, one process) ──> Postgres (users, settings,
                                               │                                 chat quota log, shared NSE cache)
                                               ├──> NSE MCP servers (market data, shared cache in front)
                                               └──> Anthropic API (the chat assistant)
 ```
 
 * **Sign-in:** Google only, by invitation. Your own signed session cookie lasts 12 hours.
-* **Per user:** watchlist and track record, funding rules, live watch list, assistant quota and token log.
+* **Per user, on the server:** funding rules, live watch list, assistant quota and token log.
+* **Per user, on their own computer:** the Evaluation list and the suggestions it receives (see section 10b).
 * **Shared:** NSE market data (cached, so ten users asking about TCS cost one NSE request) and the Anthropic key.
 * **Admin only:** the Anthropic key and model (Settings), the tool explorer, `/api/admin/usage`, `/api/admin/cache`.
 
@@ -31,7 +32,7 @@ Steps 1 to 3 are the same for every route. Step 8 onwards (first sign-in, operat
 
 | Path | What it is |
 |---|---|
-| `server.py`, `auth.py`, `db.py`, `usage.py`, `user_store.py`, `tracker.py`, `nse_cache.py` and the other `.py` files | The application |
+| `server.py`, `auth.py`, `db.py`, `usage.py`, `user_store.py`, `nse_cache.py` and the other `.py` files | The application |
 | `static/` | The web page (`index.html`) and the chat widget |
 | `Dockerfile`, `docker-compose.yml`, `Caddyfile` | Route A |
 | `render.yaml` | Route B |
@@ -40,7 +41,8 @@ Steps 1 to 3 are the same for every route. Step 8 onwards (first sign-in, operat
 | `.env.production.example`, `.env.local.example` | Settings templates |
 | `requirements.txt`, `requirements.lock.txt` | Packages: loose (local) and exact tested versions (Docker, Render) |
 | `tests/`, `scripts/run_tests.sh` | The automated tests |
-| `import_legacy.py` | One-time import of your old single-owner data |
+| `static/eval-store.js` | Keeps each user's Evaluation list on their own computer |
+| `import_legacy.py` | One-time import of your old funding rules |
 
 `agent_app.py` is an older anonymous chat service. **Do not deploy it** in the multiuser setup: it has no sign-in.
 
@@ -190,18 +192,18 @@ Things to know on Render:
 2. **Settings > Test NSE connection.** NSE may treat a data-centre address differently from your home connection, and this has not been tested from your host. If both servers fail only from the server, that is the reason.
 3. **Settings > Anthropic API key > Test current key**, then ask the chat assistant a question.
 4. Open `/api/admin/cache` and `/api/admin/usage` in the same browser tab (you are signed in). After a few lookups the cache report should show hits.
-5. **Bring over your old data** (optional, one time). Copy `suggestions_log.json` and `funding_rules.json` from the old install into the folder the app reads, then import them into *your* account only:
-   * Docker: `cp suggestions_log.json funding_rules.json data/` then
-     `docker compose exec app python import_legacy.py you@gmail.com`
-   * No Docker: put the two files in `/opt/nse-dashboard/data/`, then
-     `cd /opt/nse-dashboard && sudo -u nse env DASHBOARD_DATA_DIR=/opt/nse-dashboard/data .venv/bin/python import_legacy.py you@gmail.com`
-   * Render: run it from your own computer with `DATABASE_URL` set to the database's **external** URL (from the Render dashboard) and the two files beside the code: `python import_legacy.py you@gmail.com`.
+5. **Bring over your old data** (optional, one time).
+   * **Evaluation list** (`suggestions_log.json`): it is no longer kept on the server. In the app open the **Evaluation** tab, click **Open my file…** and choose your old `suggestions_log.json`. It is read in your browser and kept on your computer (see section 10b).
+   * **Funding rules** (`funding_rules.json`): copy the file into the folder the app reads, then import it into *your* account:
+     * Docker: `cp funding_rules.json data/` then `docker compose exec app python import_legacy.py you@gmail.com`
+     * No Docker: put it in `/opt/nse-dashboard/data/`, then `cd /opt/nse-dashboard && sudo -u nse env DASHBOARD_DATA_DIR=/opt/nse-dashboard/data .venv/bin/python import_legacy.py you@gmail.com`
+     * Render: run it from your own computer with `DATABASE_URL` set to the database's **external** URL (from the Render dashboard) and the file beside the code: `python import_legacy.py you@gmail.com`
 6. **Invite someone.** Add their Google address to `ALLOWED_EMAILS`, then restart:
    * Docker: `docker compose up -d --force-recreate app`
    * Render: save the Environment tab (it redeploys)
    * No Docker: `sudo systemctl restart nse-dashboard`
 
-   (If the Google app is in *Testing*, also add them as a test user in Google.) They sign in, start with an empty watchlist and the default settings, and nobody else can see their data.
+   (If the Google app is in *Testing*, also add them as a test user in Google.) They sign in, start with an empty Evaluation list and the default settings, and nobody else can see their data.
 
 ## 9. Running it
 
@@ -257,6 +259,26 @@ Errors and empty answers are never cached. The admin tool explorer (`/api/call`)
 
 Live quotes on the Live tab can be up to 30 seconds old, so the "Updated" time on that tab may be slightly ahead of the quote's own timestamp. The quote's own age column is the real signal.
 
+## 10b. Where the Evaluation list lives
+
+The Evaluation tab (stocks you ticked, and stocks **Suggest stocks** found) is stored on **each user's own computer**, not on the server. Nothing about it is in the database or on Render's disk.
+
+* **Automatically:** every change is saved in the browser's own storage, kept separately for each signed-in user, and loaded again every time the app opens.
+* **As a JSON file (recommended):** in the Evaluation tab, **Your saved list**:
+  * *Create a file…* (Chrome and Edge): choose where `nse-evaluation.json` lives, for example in a synced folder. From then on every change is written to it, and it is loaded each visit. The browser asks permission once per visit; click **Reconnect file**.
+  * *Open my file…*: merges a file into your list (an old `suggestions_log.json` works too). In Chrome and Edge it also links the file.
+  * *Download a copy*: works in every browser, including Firefox and Safari, which cannot keep a file linked.
+* **Checking outcomes:** **Refresh outcomes** sends the list to the server, which checks prices against the shared NSE data and sends the results back. Nothing is stored. Up to 300 stocks with levels are checked at a time.
+* **The assistant:** the chat widget sends the newest 50 entries with each question so the assistant can discuss them. They are used for that answer only.
+
+Things to tell your users:
+* The list is **per browser and per computer**. A different browser or computer starts empty until they open their file there. Linking a file in a synced folder (OneDrive, Google Drive, Dropbox) gives the same list everywhere.
+* Browsers can clear their storage (clearing site data, private windows). A linked or downloaded file is the safe copy.
+* If a file is linked and permission is missing at the start of a visit, changes are kept in the browser and merged into the file when they reconnect.
+* A file that is not an evaluation list is never overwritten.
+
+Because of this, **backing up the database does not back up anyone's Evaluation list**, and you cannot recover a user's list for them.
+
 ## 11. Troubleshooting
 
 | Symptom | Likely cause and fix |
@@ -294,7 +316,7 @@ This setup lets other people see entry, stop and target levels produced by a rul
 
 - Check **NSE's terms**: are you allowed to show this data to others?
 - Check **Indian rules on public investment guidance.** Showing entry, stop and target levels to others may need SEBI research-analyst or investment-adviser registration. Ask someone qualified. The "information only" wording in the app and the assistant's prompt does not by itself settle this.
-- Add **terms of use and a privacy notice** (Google also asks for these when you publish the sign-in app). The app stores each user's Google email, name and picture, their watchlist, settings and chat usage counts (not chat text).
+- Add **terms of use and a privacy notice** (Google also asks for these when you publish the sign-in app). The app stores each user's Google email, name and picture, their funding rules and live watch list, and chat usage counts (not chat text). The Evaluation list stays on each user's own computer.
 - Keep the Anthropic spending limit and the per-user caps in place.
 
 Not included in this version: email invites or an in-app user admin screen (users are managed with the SQL above), schema migrations, two-step sign-in beyond what Google provides, and an audit log.

@@ -1,0 +1,35 @@
+{
+ "app": "nse-dashboard",
+ "kind": "evaluation-list",
+ "version": 1,
+ "saved_at": "2026-10-11T16:32:03.190Z",
+ "note": "Your NSE dashboard evaluation list. In the app: Evaluation tab > Open my file.",
+ "entries": [
+  {
+   "id": "5260b7cdb113",
+   "symbol": "CHENNPETRO",
+   "source": "user",
+   "as_of": "2026-10-09",
+   "entry": 1487.7,
+   "stop_loss": 1346.4,
+   "target": 1770.3,
+   "score": "4/4",
+   "hold_days": 11,
+   "logged_at": "2026-10-11T16:32:02",
+   "taken": false
+  },
+  {
+   "id": "ea533a8560a3",
+   "symbol": "ELECON",
+   "source": "user",
+   "as_of": "2026-10-09",
+   "entry": null,
+   "stop_loss": null,
+   "target": null,
+   "score": null,
+   "hold_days": null,
+   "logged_at": "2026-10-11T16:32:02",
+   "taken": false
+  }
+ ]
+}

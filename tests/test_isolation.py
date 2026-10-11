@@ -3,7 +3,7 @@ tmp = tempfile.mkdtemp()
 os.environ.update(DASHBOARD_DATA_DIR=tmp, GOOGLE_CLIENT_ID="test-client.apps.googleusercontent.com", DASHBOARD_SECRET="x"*40,
                   ADMIN_EMAILS="boss@example.com", ALLOWED_EMAILS="friend@example.com,new@example.com")
 from fastapi.testclient import TestClient
-import auth, server, funding
+import auth, db, server, funding
 
 def fake(email):
     return lambda cred: {"email": email, "email_verified": True, "sub": "sub-" + email, "name": email.split("@")[0], "picture": None}
@@ -19,31 +19,30 @@ server._fetch_history_adjusted = no_hist
 server._list_tools = no_tools
 
 A, B = client("boss@example.com"), client("friend@example.com")
-item = {"symbol": "TCS", "as_of": "2026-10-09", "entry": 100.0, "stop_loss": 90.0, "target": 120.0, "score": "4/4", "hold_days": 10}
-watch = {"symbol": "KOTAKBANK", "as_of": "2026-10-09"}
 
-# --- watchlist: separate histories
-r = A.post("/api/track/add", json={"source": "user", "items": [item, watch]}); assert r.status_code == 200 and r.json()["added"] == 2, r.text
-a_ids = r.json()["ids"]
-assert B.get("/api/track/list").json()["entries"] == []                       # a user with no history sees none
-assert B.get("/api/track").json()["entries"] == []
-r = B.post("/api/track/add", json={"source": "user", "items": [item]}); assert r.json()["added"] == 1   # same stock+date is NOT "already there" for B
-b_id = r.json()["ids"][0]; assert b_id not in a_ids
-assert len(A.get("/api/track/list").json()["entries"]) == 2
-assert [e["id"] for e in B.get("/api/track/list").json()["entries"]] == [b_id]
-# duplicates inside one user's list are still skipped
-assert A.post("/api/track/add", json={"source": "user", "items": [item]}).json() == {"added": 0, "skipped": 1, "ids": [a_ids[0]]}
-# B can't touch A's rows (looks like "not found")
-assert B.post(f"/api/track/{a_ids[0]}/taken", json={"taken": True}).status_code == 404
-assert B.delete(f"/api/track/{a_ids[0]}").status_code == 404
-a_rows = A.get("/api/track/list").json()["entries"]
-assert len(a_rows) == 2 and not any(e["taken"] for e in a_rows)
-# owner can
-assert A.post(f"/api/track/{a_ids[0]}/taken", json={"taken": True}).status_code == 200
-assert B.delete(f"/api/track/{b_id}").status_code == 200
-assert len(A.get("/api/track/list").json()["entries"]) == 2 and B.get("/api/track/list").json()["entries"] == []
-# outcomes endpoint only evaluates the caller's entries
-assert {e["symbol"] for e in A.get("/api/track").json()["entries"]} == {"TCS", "KOTAKBANK"}
+# --- the evaluation list is NOT kept on the server: it lives on each user's own computer
+assert "watchlist_entries" not in db.Base.metadata.tables
+for path in ("/api/track/list", "/api/track"): assert A.get(path).status_code == 404, path
+assert A.post("/api/track/add", json={"source": "user", "items": []}).status_code in (404, 405)
+
+# --- ...but the server can still check outcomes for the list a browser sends (stateless)
+async def hist(url, sym, months, partial_ok=False):
+    return [{"date": f"2026-10-{i + 1:02d}", "open": 100 + 2 * i, "high": 100 + 2 * i, "low": 100 + 2 * i, "close": 100 + 2 * i} for i in range(20)]
+server._fetch_history_adjusted = hist
+e1 = {"id": "abc12345", "symbol": "tcs", "as_of": "2026-10-05", "entry": 108.0, "stop_loss": 100.0, "target": 124.0, "source": "user", "hold_days": 20, "taken": False}
+r = A.post("/api/track/evaluate", json={"entries": [e1]}); assert r.status_code == 200, r.text
+row = r.json()["entries"][0]; assert row["status"] == "target" and row["id"] == "abc12345" and row["symbol"] == "TCS", row
+assert B.post("/api/track/evaluate", json={"entries": [{**e1, "id": "zzz99999", "stop_loss": 120.0, "entry": 125.0, "target": 130.0}]}).json()["entries"][0]["status"] in ("stopped", "open", "pending", "expired", "target")
+assert A.post("/api/track/evaluate", json={"entries": []}).json() == {"entries": []}
+async def no_hist(*a, **k): return []
+server._fetch_history_adjusted = no_hist
+assert A.post("/api/track/evaluate", json={"entries": [e1]}).json()["entries"][0]["status"] == "no_data"
+# bad input is refused
+for bad in ({**e1, "stop_loss": 110.0}, {**e1, "symbol": "bad symbol!"}, {**e1, "as_of": "yesterday"}):
+    assert A.post("/api/track/evaluate", json={"entries": [bad]}).status_code == 400, bad
+assert A.post("/api/track/evaluate", json={"entries": [{**e1, "id": str(i)} for i in range(301)]}).status_code == 400
+assert A.post("/api/track/evaluate", json={"entries": [{"symbol": "TCS"}]}).status_code == 422
+assert TestClient(server.app).post("/api/track/evaluate", json={"entries": [e1]}).status_code == 401
 
 # --- funding rules: separate settings, new users start on defaults
 assert A.get("/api/funding/rules").json()["rules"]["customised"] is False
@@ -68,6 +67,6 @@ assert B.post("/api/call", json={"server": "bhavcopy", "tool": "x"}).status_code
 assert B.get("/api/settings").status_code == 403 and A.get("/api/settings").status_code == 200
 assert B.post("/api/settings/test").status_code == 403
 anon = TestClient(server.app, follow_redirects=False)
-for path in ("/api/track/list", "/api/funding/rules", "/api/prefs", "/api/tools?server=bhavcopy"):
+for path in ("/api/funding/rules", "/api/prefs", "/api/tools?server=bhavcopy"):
     assert anon.get(path).status_code == 401, path
 print("isolation tests passed")
