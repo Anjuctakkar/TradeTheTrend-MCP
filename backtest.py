@@ -69,7 +69,7 @@ def simulate_exit(o, h, l, c, start: int, stop: float, target: float, max_hold: 
     return n - 1, c[n - 1], "open"
 
 
-def run(records: list[dict[str, Any]], max_hold: int = 20, cost_pct: float = 0.2) -> dict[str, Any]:
+def run(records: list[dict[str, Any]], max_hold: int = 20, cost_pct: float = 0.2, signal_fn=None) -> dict[str, Any]:
     p = prepare(records)
     dates, o, h, l, c = p["dates"], p["o"], p["h"], p["l"], p["c"]
     n = len(c)
@@ -83,8 +83,9 @@ def run(records: list[dict[str, Any]], max_hold: int = 20, cost_pct: float = 0.2
     trades: list[dict[str, Any]] = []
     i = WARMUP - 1
     while i < n - 1:
-        sig = technical.generate_trade_signal(c[: i + 1], s20[: i + 1], s50[: i + 1],
-                                              rsi[: i + 1], ml[: i + 1], ms[: i + 1])
+        # signal_fn(prepared, i) lets another rule set (e.g. sr_model.signal_from_prepared) replace the default one.
+        sig = signal_fn(p, i) if signal_fn else technical.generate_trade_signal(
+            c[: i + 1], s20[: i + 1], s50[: i + 1], rsi[: i + 1], ml[: i + 1], ms[: i + 1])
         if sig.get("signal") != "LONG":
             i += 1
             continue

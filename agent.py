@@ -15,7 +15,8 @@ SYSTEM_PROMPT = """You are an assistant for Indian equity (NSE) market data and 
 What you can do, using your tools:
 - find NSE ticker symbols, show a stock's price, moving averages, RSI, MACD and corporate actions
 - show a mechanical, rule-based long setup (entry, stop, target) or "no trade", with the 52-week high and low and a proposed holding period
-- backtest that rule set on a stock's past prices
+- backtest that rule set on a stock's past prices, or backtest the separate support/resistance rule set (strategy "sr")
+- show a stock's support and resistance zones and the rule-based support-bounce or resistance-breakout long setup (sr_levels)
 - scan the most-traded stocks for setups that don't overlap with stocks the user holds
 - show live quotes and today's top gainers and losers
 - when you have a my_watchlist tool, show the stocks on the user's own evaluation list, which is kept on their computer and shared by their browser (entry, stop, target, when added). It has no outcomes; those are on the Evaluation tab
@@ -23,7 +24,8 @@ What you can do, using your tools:
 Rules:
 - Use tools for every number. Never invent prices, dates, indicators or backtest results. If a tool fails, say so plainly and suggest trying again.
 - State the date the data is as of. End-of-day data can be a day or more old.
-- The setups come from a simple fixed rule set (20/50-day SMA trend, price vs 20-day SMA, MACD vs signal, RSI zone). Describe them as what the rules output, not as a recommendation. You do not give personalised investment advice. If asked "should I buy", explain what the rules show and the main risks, and say the decision is theirs, ideally with a SEBI-registered adviser.
+- Prices: the setup (entry, stop, target) and the indicators come from end-of-day closes and only change once a day. `cmp` is the current market price, live while the market is open. Always say where a price comes from and when (cmp_source and cmp_as_of: live, last_trade or eod). Use cmp_check to say whether the setup still holds at today's price: below the stop or above the target means it no longer applies as written. Do not describe a closing price as the current price.
+- The setups come from simple fixed rule sets: the trend rules (20/50-day SMA trend, price vs 20-day SMA, MACD vs signal, RSI zone) and the support/resistance rules (swing-pivot zones with at least 2 touches, a bounce off support or a fresh breakout above resistance, stop below the zone, target under the next resistance). Say which rule set a setup comes from. Describe them as what the rules output, not as a recommendation. sr_levels uses end-of-day bars like the others; check cmp_check against the current price. You do not give personalised investment advice. If asked "should I buy", explain what the rules show and the main risks, and say the decision is theirs, ideally with a SEBI-registered adviser.
 - Backtests on stocks chosen because they look strong today flatter the rules, and small trade counts (under 30) prove little. Say this whenever you report backtest results.
 - Prices are adjusted for splits and bonuses in analysis and backtests. The server's own moving-average figures are unadjusted; mention a mismatch if a corporate action is listed.
 - A holding period is only proposed when the tool says so. If its status is 'none', say no holding period is proposed and give the reason. When one is proposed, share the reasoning briefly and say it is a check-back point, not a prediction. Never make up a holding period or 52-week figure.
@@ -39,7 +41,7 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "analyze_stock",
-        "description": "Latest end-of-day analysis for one NSE symbol: last price and its date, SMA20/SMA50, RSI(14), MACD, the rule-based signal (LONG with entry/stop/target, or NO_TRADE with reasons), the 52-week high and low, a proposed holding period with its reasoning (or status 'none' with the reason), and any corporate actions in the last 12 months.",
+        "description": "Analysis for one NSE symbol: the current market price (live when the market is open, with its source and time) and whether the setup still holds at that price, the last end-of-day close and its date, SMA20/SMA50, RSI(14), MACD, the rule-based signal (LONG with entry/stop/target, or NO_TRADE with reasons), the 52-week high and low, a proposed holding period with its reasoning (or status 'none' with the reason), and any corporate actions in the last 12 months.",
         "input_schema": {"type": "object", "properties": {"symbol": {"type": "string", "description": "NSE ticker, e.g. TCS"}}, "required": ["symbol"]},
     },
     {
@@ -49,15 +51,22 @@ TOOLS: list[dict[str, Any]] = [
             "symbol": {"type": "string"},
             "months": {"type": "integer", "description": "History length, 6 to 24. Default 12."},
             "max_hold_days": {"type": "integer", "description": "Max trading days per trade. Default 20."},
-            "cost_pct": {"type": "number", "description": "Round-trip cost in percent. Default 0.2."}},
+            "cost_pct": {"type": "number", "description": "Round-trip cost in percent. Default 0.2."},
+            "strategy": {"type": "string", "enum": ["trend", "sr"], "description": "'trend' (default) = SMA/MACD/RSI rules; 'sr' = support/resistance rules."}},
             "required": ["symbol"]},
     },
     {
+        "name": "sr_levels",
+        "description": "Support and resistance zones (price, touches, ATR) for one NSE symbol and the rule-based support/resistance long setup: LONG (support_bounce or resistance_breakout, with entry/stop/target) or NO_TRADE with reasons. Also returns the current market price and, for a LONG, whether the setup still holds at that price.",
+        "input_schema": {"type": "object", "properties": {"symbol": {"type": "string", "description": "NSE ticker, e.g. TCS"}}, "required": ["symbol"]},
+    },
+    {
         "name": "suggest_stocks",
-        "description": "Scan the 30 most-traded NSE stocks for rule-based LONG setups and return up to 5, ranked by rule score and low correlation with the user's holdings, with the budget split equally. Slow (about a minute).",
+        "description": "Scan the 30 most-traded NSE stocks for rule-based LONG setups and return up to 5, ranked by rule score and low correlation with the user's holdings, with the budget split equally. Quantities use the current market price, and setups already below their stop or above their target at that price are skipped (listed in skipped_by_price). Slow (about a minute).",
         "input_schema": {"type": "object", "properties": {
             "budget": {"type": "number", "description": "Rupees to deploy."},
-            "holdings": {"type": "array", "items": {"type": "string"}, "description": "NSE symbols the user already holds (optional, max 10)."}},
+            "holdings": {"type": "array", "items": {"type": "string"}, "description": "NSE symbols the user already holds (optional, max 10)."},
+            "model": {"type": "string", "enum": ["trend", "sr", "either"], "description": "Which rule set may produce picks: trend (default), sr (support/resistance) or either."}},
             "required": ["budget"]},
     },
     {
@@ -76,7 +85,7 @@ TOOLS: list[dict[str, Any]] = [
 
 WATCHLIST_TOOL: dict[str, Any] = {
     "name": "my_watchlist",
-    "description": "The stocks on the signed-in user's own evaluation list, kept on their computer and shared by their browser: symbol, who added it (user or system), date added, entry/stop/target if there was a LONG setup then, planned holding days, and whether they took it. No live prices or outcomes.",
+    "description": "The stocks on the signed-in user's own evaluation list, kept on their computer and shared by their browser: symbol, who added it (user or system), date added, entry/stop/target if there was a LONG setup then, planned holding days, the rule set that produced it (model: trend or sr), and whether they took it. No live prices or outcomes.",
     "input_schema": {"type": "object", "properties": {
         "source": {"type": "string", "description": "Optional: 'user' for stocks they ticked, 'system' for suggested ones."},
         "limit": {"type": "integer", "description": "Max entries, newest first. Default 30, max 50."}}, "required": []},

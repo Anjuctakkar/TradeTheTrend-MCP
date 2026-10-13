@@ -4,7 +4,13 @@ os.environ.update(DASHBOARD_DATA_DIR=tmp, GOOGLE_CLIENT_ID="test-client.apps.goo
                   ADMIN_EMAILS="boss@example.com", ALLOWED_EMAILS="friend@example.com,third@example.com", ANTHROPIC_API_KEY="sk-ant-test")
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-import auth, server, agent_routes, db, usage
+import auth, server, agent_routes, db, usage, nse_cache
+nse_cache.ENABLED = False
+async def _quote_feed(url, tool, args):
+    if tool == 'cm_get_stock_quote':
+        return {'is_error': False, 'content': {'stock': {'symbol': args['symbol'], 'lastTradedPrice': 105.0, 'preClosePrice': 100.0, 'perChange': 5.0, 'latestTimestamp': __import__('datetime').datetime.now(__import__('datetime').timezone(__import__('datetime').timedelta(hours=5, minutes=30))).strftime('%Y-%m-%d %H:%M:%S')}}}
+    return {'is_error': False, 'content': {}}
+server._call_tool_raw = _quote_feed
 
 class Blk:
     def __init__(self, **kw): self.__dict__.update(kw)
@@ -76,6 +82,7 @@ wl = [{"symbol": "TCS", "as_of": "2026-10-09", "entry": 100, "stop_loss": 90, "t
 ra, rb = ask(A, "show my list", watchlist=wl).json()["reply"], ask(B, "show my list").json()["reply"]
 assert "TCS" in ra and '"count": 1' in ra and "IGNORE" not in ra and "bad" not in ra and "INFY" not in ra, ra       # only clean, known fields get through
 assert '"count": 0' in rb and "TCS" not in rb, rb                                                                     # B sent nothing, sees nothing
+assert '"cmp": 105.0' in ra and '"pct_vs_entry": 5.0' in ra, ra                                                       # each entry comes with the current price
 assert "my_watchlist" in fake.messages.tools_seen[-1]
 assert ask(A, "x", watchlist=[{"symbol": "S", "as_of": "2026-10-09"}] * 201).status_code == 422                       # oversized lists are refused
 assert "watchlist_entries" not in db.Base.metadata.tables

@@ -259,6 +259,19 @@ Errors and empty answers are never cached. The admin tool explorer (`/api/call`)
 
 Live quotes on the Live tab can be up to 30 seconds old, so the "Updated" time on that tab may be slightly ahead of the quote's own timestamp. The quote's own age column is the real signal.
 
+## 10a. Which prices are live and which are end-of-day
+
+* **Signals stay on end-of-day closes.** Entry, stop, target, RSI, MACD and the moving averages come from the Bhavcopy closes, so they change once a day. That is how the rules are defined, and it keeps backtests comparable with live results.
+* **The current market price (CMP) is live.** It comes from the CM live feed (shared 30-second cache). It is labelled **live** while the market is open and the quote is under 10 minutes old, **last trade** (with its time) when the market is closed, and **end-of-day close** only if the live feed failed. A fallback is always labelled, never passed off as live.
+* **Where the CMP is used:**
+  * Portfolio analysis: Qty, Invested and Leftover are sized at the CMP; the 52-week position is shown at the CMP; the signal box says whether the setup still holds at today's price (price now, % from the entry, reward:risk if bought now, or a warning when price is already below the stop or at the target).
+  * Funding and net P/L: costs, interest and break-even assume you buy at the CMP when the setup still holds there, and at the signal's entry otherwise.
+  * Suggest stocks: quantities use the CMP, and setups already below their stop or at their target at that price are skipped and listed.
+  * Evaluation: open trades show the CMP and a flag when today's price is at or beyond the stop or target. The status itself only changes once the day's bars confirm it.
+  * Symbol lookup, the Live tab, and the assistant (its answers state the price source and time).
+* **Cost:** one extra live-quote request per stock analysed, shared across users for 30 seconds.
+* **Not covered:** the market-open check uses the clock and weekday only, not NSE holidays. On a holiday the CMP shows as *last trade* with its real timestamp.
+
 ## 10b. Where the Evaluation list lives
 
 The Evaluation tab (stocks you ticked, and stocks **Suggest stocks** found) is stored on **each user's own computer**, not on the server. Nothing about it is in the database or on Render's disk.
@@ -278,6 +291,22 @@ Things to tell your users:
 * A file that is not an evaluation list is never overwritten.
 
 Because of this, **backing up the database does not back up anyone's Evaluation list**, and you cannot recover a user's list for them.
+
+## 10c. Two rule sets
+
+Setups come from two fixed, mechanical rule sets. Neither is advice.
+
+* **Trend and momentum** (`technical.py`): 20/50-day SMA trend, price vs 20-day SMA, MACD vs signal, RSI zone.
+* **Support and resistance** (`sr_model.py`): swing-pivot zones with at least 2 touches, then a bounce off support or a fresh breakout above resistance. Stop below the zone, target just under the next resistance (or 2x the risk if none).
+
+Where they show up:
+* **Portfolio analysis:** each stock card shows both setups. The support/resistance zones are drawn on the price chart. **Sizing and funding use** (Capital section) chooses which setup drives the suggested capital split and the net P/L figures; the default is trend and momentum.
+* **Suggest stocks:** a **Rule set** selector (trend, support/resistance, or either). Each pick is labelled with the rule set that found it.
+* **Backtest:** a **Rule set** selector. The holding-period cross-check also replays the same rule set that produced the setup.
+* **Evaluation list:** each entry records its rule set, and the summary table compares them. Ticking **Eval** on a stock adds one entry per rule set that shows a LONG setup. Old lists load as trend and momentum.
+* **Assistant:** `sr_levels`, `strategy` on `backtest_stock`, `model` on `suggest_stocks`, and the rule set on watchlist entries.
+
+The two rule sets are separate setups with their own entry, stop and target. Compare their outcomes on the Evaluation tab over a real sample before relying on either. Run the checks in `tests/test_sr_model.py` after any change to `sr_model.py`.
 
 ## 11. Troubleshooting
 

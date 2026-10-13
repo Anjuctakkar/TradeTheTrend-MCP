@@ -1,0 +1,7 @@
+1. Unzip this archive INTO your project folder (the one that contains server.py). Choose "replace" for existing files.
+   The static/ folder must end up at <project>/static/ (that is where index.html is served from).
+2. Run:  python check_install.py     (it must say "All good")
+3. Fully restart the server (stop it, start it again). On Render/Docker: redeploy.
+4. Open the app and press Ctrl+F5.
+5. Confirm: the top-left shows "S/R build 2026-10-13", and /health returns "build": "sr-2026-10-13".
+   If you see the build text, the new view is loaded; run an analysis and look for the S/R box under each stock.

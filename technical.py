@@ -87,7 +87,7 @@ def latest_value(values: list[Optional[float]]) -> Optional[float]:
     return None
 
 
-def generate_trade_signal(
+def _trend_signal(
     closes: list[Optional[float]],
     sma20: list[Optional[float]],
     sma50: list[Optional[float]],
@@ -186,3 +186,46 @@ def generate_trade_signal(
         "risk_per_share": round(risk, 2),
         "reward_risk_ratio": round((target - last_close) / risk, 2) if risk else None,
     }
+
+
+def generate_trade_signal(
+    closes: list[Optional[float]],
+    sma20: list[Optional[float]],
+    sma50: list[Optional[float]],
+    rsi_series: list[Optional[float]],
+    macd_line: list[Optional[float]],
+    macd_signal: list[Optional[float]],
+) -> dict:
+    """The trend and momentum long setup (rules described in _trend_signal above), tagged with the rule set that
+    produced it: "model": "trend" and, for a LONG, "setup": "trend_momentum". The support/resistance rule set in
+    sr_model.py returns the same shape with its own "setup", so callers can treat the two alike."""
+    out = _trend_signal(closes, sma20, sma50, rsi_series, macd_line, macd_signal)
+    out["model"] = "trend"
+    if out.get("signal") == "LONG":
+        out["setup"] = "trend_momentum"
+    return out
+
+
+def compare_signals(trend: dict, sr: dict) -> dict:
+    """Do the trend/momentum rules and the support/resistance rules both show a LONG setup for the same stock?
+    They have their own entry, stop and target, so this only says whether the two rule sets agree."""
+    t, s = trend.get("signal") == "LONG", sr.get("signal") == "LONG"
+    status = "both_long" if t and s else "trend_only" if t else "sr_only" if s else "neither"
+    note = {
+        "both_long": "Both rule sets show a LONG setup. Each has its own entry, stop and target.",
+        "trend_only": "Only the trend and momentum rules show a LONG setup; the support/resistance rules show no trade.",
+        "sr_only": "Only the support/resistance rules show a LONG setup; the trend and momentum rules show no trade.",
+        "neither": "Neither rule set shows a LONG setup.",
+    }[status]
+    return {"status": status, "note": note}
+
+
+def check_price(entry: float, stop: float, target: float, price: float) -> dict:
+    """How the current market price sits against a setup whose levels came from end-of-day closes.
+
+    status: "ok" (between stop and target), "below_stop" or "above_target" (the setup no longer applies as written).
+    pct_from_entry: how far price has moved from the entry. reward_risk_now: the reward:risk if bought at `price`
+    (None once price is outside the stop-target range)."""
+    status = "below_stop" if price <= stop else "above_target" if price >= target else "ok"
+    return {"status": status, "pct_from_entry": round((price / entry - 1) * 100, 2) if entry else None,
+            "reward_risk_now": round((target - price) / (price - stop), 2) if stop < price < target else None}

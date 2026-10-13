@@ -46,6 +46,7 @@ import funding
 import holding
 import nse_cache
 import recommend
+import sr_model
 import technical
 
 app = FastAPI(title="NSE MCP Dashboard",
@@ -63,7 +64,7 @@ def health():
     except Exception as exc:  # noqa: BLE001
         print(f"[health] database check failed: {type(exc).__name__}: {exc}", flush=True)
         raise HTTPException(503, "database unavailable")
-    return {"ok": True}
+    return {"ok": True, "build": "sr-2026-10-13"}
 
 SERVERS: dict[str, str] = {
     "bhavcopy": os.getenv("NSE_BHAV_URL", "https://mcp.nseindia.in/bhavcopy/cm/mcp"),
@@ -105,11 +106,13 @@ class AnalyzeRequest(BaseModel):
     max_weight_pct: float = 35.0
     use_mtf: bool = False                 # fund part of each position with MTF (rules in funding_rules.json)
     mtf_limit: Optional[float] = None     # broker MTF limit in Rs; None = no limit
+    signal_model: str = "trend"           # which setup drives capital split and funding outcomes: "trend" or "sr"
 
 
 class RecommendRequest(BaseModel):
     budget: float
     existing: list[dict[str, Any]] = []
+    model: str = "trend"          # which rule set may produce picks: "trend", "sr" or "either"
 
 
 def _to_float(value: Any) -> Optional[float]:
@@ -375,15 +378,19 @@ def _num(v: Any) -> Optional[float]:
 
 
 def _first_record(c: Any) -> Optional[dict[str, Any]]:
-    """The quote dict inside whatever wrapper the tool used."""
+    """The quote dict inside whatever wrapper the tool used (for example {"updatedAt": ..., "stock": {...}})."""
     if isinstance(c, list):
         return _first_record(c[0]) if c else None
     if isinstance(c, dict):
-        for k in ("data", "quote", "result", "quotes"):
+        for k in ("data", "quote", "result", "quotes", "stock"):
             if k in c and isinstance(c[k], (dict, list)):
                 inner = _first_record(c[k])
                 if inner:
                     return inner
+        # No known wrapper name: if there is no price here but exactly one nested object, the quote is inside it.
+        nested = [v for v in c.values() if isinstance(v, dict)]
+        if len(nested) == 1 and not _pick(c, ["ltp", "lastprice", "lasttradedprice"]):
+            return _first_record(nested[0]) or c
         return c
     return None
 
@@ -411,7 +418,7 @@ def _normalise_quote(symbol: str, c: Any) -> dict[str, Any]:
     rec = _first_record(c)
     if not isinstance(rec, dict):
         raise RuntimeError("The quote came back in a shape I couldn't read.")
-    ltp = _num(_pick(rec, ["ltp", "lastprice", "lasttradedprice", "last", "closeprice", "close"]))
+    ltp = _num(_pick(rec, ["ltp", "lastprice", "lasttradedprice", "last"]))   # never fall back to a close: that would pass a stale price off as live
     prev = _num(_pick(rec, ["prevprice", "previousprice", "preclose", "previousclose", "prevclose", "precloseprice", "previousclosingprice"]))
     # NOTE: the CM server's "net_price" field holds the PERCENT change (e.g. 14.36), not the rupee change,
     # so it is deliberately not read here; the rupee change is computed from ltp and the previous price.
@@ -437,10 +444,78 @@ def _normalise_quote(symbol: str, c: Any) -> dict[str, Any]:
         "change": None if chg is None else round(chg, 2), "pct_change": None if pct is None else round(pct, 2),
         "volume": _num(_pick(rec, ["volume", "totaltradedvolume", "tradedvolume", "totaltradedquantity", "tradequantity", "tradedquantity", "tradeqty", "qty", "quantity", "totalqty", "totalvolume", "tradedqty"])),
         "high_52w": hi52, "low_52w": lo52, "series": _pick(rec, ["series"]),
+        "time_iso": ts.isoformat() if ts else None,
         "updated": ts.strftime("%d %b %Y %H:%M:%S") if ts else (str(_pick(rec, ["latesttimestamp", "timestamp"])) if _pick(rec, ["latesttimestamp", "timestamp"]) else None),
         "age_seconds": max(0, int((now - ts).total_seconds())) if ts else None,
         "raw": rec,
     }
+
+
+CMP_FRESH_SECONDS = 600       # a quote older than this during market hours is shown as "last trade", not "live"
+MAX_LIVE_PRICES = 40          # most distinct stocks priced live in one evaluation
+
+
+async def get_cmp(symbol: str, eod_close: Optional[float] = None, eod_date: Optional[str] = None) -> dict[str, Any]:
+    """Current market price (CMP) for one stock, from the CM live feed (shared 30-second cache).
+
+    source: "live"        market open and the quote is under 10 minutes old
+            "last_trade"  market closed (or the quote is older): the last traded price and its time
+            "eod"         the live feed failed or its quote is older than the end-of-day data: the last close is used
+            "none"        no price at all
+    Never raises: a live-feed problem must not break an analysis, so it falls back to the end-of-day close."""
+    out: dict[str, Any] = {"symbol": symbol, "cmp": eod_close, "source": "eod" if eod_close is not None else "none",
+                           "as_of": eod_date, "as_of_iso": None, "age_seconds": None, "change_pct": None, "prev_close": None, "note": None}
+    try:
+        raw = await _call_tool(SERVERS["cm"], "cm_get_stock_quote", {"symbol": symbol})
+        if raw.get("is_error"):
+            raise RuntimeError(str(raw.get("note") or raw.get("content"))[:150])
+        q = _normalise_quote(symbol, raw.get("content"))
+    except Exception as exc:  # noqa: BLE001
+        out["note"] = f"Live price unavailable ({_describe_error(exc)[:120]}); using the last end-of-day close."
+        return out
+    if q["ltp"] is None:
+        out["note"] = "The live feed returned no price; using the last end-of-day close."
+        return out
+    quote_day = None
+    try:
+        quote_day = dt.datetime.fromisoformat(q["time_iso"]).date() if q.get("time_iso") else None
+        if eod_date and quote_day and quote_day < dt.date.fromisoformat(str(eod_date)[:10]):
+            out["note"] = "The live feed's last quote is older than the end-of-day data; using the end-of-day close."
+            return out
+    except ValueError:
+        pass
+    live = _market_status()["state"] == "open" and q["age_seconds"] is not None and q["age_seconds"] <= CMP_FRESH_SECONDS
+    out.update(cmp=q["ltp"], source="live" if live else "last_trade", as_of=q["updated"], as_of_iso=q.get("time_iso"),
+               age_seconds=q["age_seconds"], change_pct=q["pct_change"], prev_close=q["prev_close"])
+    return out
+
+
+def _apply_cmp_to_week52(w52: dict[str, Any], cmp_price: Optional[float], info: dict[str, Any]) -> None:
+    """Re-express the 52-week position at the current price (a new high or low today moves the range)."""
+    if w52.get("status") != "ok" or cmp_price is None or info.get("source") not in ("live", "last_trade"):
+        return
+    if cmp_price > w52["high"]:
+        w52["high"], w52["high_date"] = round(cmp_price, 2), (info.get("as_of_iso") or "")[:10] or w52["high_date"]
+    if cmp_price < w52["low"]:
+        w52["low"], w52["low_date"] = round(cmp_price, 2), (info.get("as_of_iso") or "")[:10] or w52["low_date"]
+    hi, lo = w52["high"], w52["low"]
+    w52.update(price=round(cmp_price, 2), price_date=(info.get("as_of_iso") or "")[:10] or w52["price_date"], price_source=info["source"],
+               pct_below_high=round((hi - cmp_price) / hi * 100, 1) if hi else None,
+               pct_above_low=round((cmp_price - lo) / lo * 100, 1) if lo else None,
+               position_pct=round((cmp_price - lo) / (hi - lo) * 100) if hi > lo else None)
+
+
+@app.get("/api/cmp")
+async def cmp_prices(symbols: str):
+    """Current market price for up to 20 stocks: live when the market is open, otherwise the last traded price."""
+    syms = list(dict.fromkeys(x.strip().upper() for x in re.split(r"[,\s]+", symbols) if x.strip()))[:20]
+    if not syms:
+        raise HTTPException(400, "Give at least one symbol.")
+    for x in syms:
+        if not (1 <= len(x) <= 20 and all(ch.isalnum() or ch in "-&_" for ch in x)):
+            raise HTTPException(400, f"'{x}' doesn't look like an NSE symbol.")
+    infos = await asyncio.gather(*(get_cmp(s) for s in syms))
+    return {"market": _market_status(), "prices": {i["symbol"]: i for i in infos}}
 
 
 def _mover_row(r: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -769,9 +844,25 @@ async def _analyze_one(url: str, stock: StockAllocation, today: str) -> dict[str
         if w52.get("status") == "ok" and ca["status"] != "ok":
             w52["unchecked"] = True  # splits/bonuses couldn't be looked up, so the range may be distorted
         hold = holding.propose(trade_signal, adj_records, w52)
+        # Second rule set: support and resistance. It is shown next to the trend signal; funding and allocation
+        # keep using the trend signal, so nothing there changes.
+        sr_p = backtest.prepare(adj_records)
+        sr_signal = sr_model.generate_sr_signal(sr_p["o"], sr_p["h"], sr_p["l"], sr_p["c"])
+        sr_hold = holding.propose(sr_signal, adj_records, w52, model="sr")
 
         # The signal's entry/stop/target come from adjusted closes; the latest
         # close is after any ex-date, so they're on the same scale as the LTP.
+        # The signal and indicators stay on end-of-day closes (that is how the rules are defined). The current
+        # market price is used for sizing, cost, the 52-week position, and a check that the setup still holds.
+        eod_close = latest_price
+        cmp_info = await get_cmp(symbol, eod_close, ltp_date[:10])
+        cmp_price = cmp_info["cmp"] if cmp_info["cmp"] is not None else eod_close
+        long_setup = trade_signal.get("signal") == "LONG" and cmp_price is not None
+        cmp_check = technical.check_price(trade_signal["entry"], trade_signal["stop_loss"], trade_signal["target"], cmp_price) if long_setup else None
+        buy_price = cmp_price if cmp_check and cmp_check["status"] == "ok" else None
+        sr_check = (technical.check_price(sr_signal["entry"], sr_signal["stop_loss"], sr_signal["target"], cmp_price)
+                    if sr_signal.get("signal") == "LONG" and cmp_price is not None else None)
+        _apply_cmp_to_week52(w52, cmp_price, cmp_info)
         try:
             ltp_age_days = (dt.date.fromisoformat(today) - dt.date.fromisoformat(ltp_date[:10])).days
         except ValueError:
@@ -781,9 +872,13 @@ async def _analyze_one(url: str, stock: StockAllocation, today: str) -> dict[str
             "dates": dates, "close": closes, "sma20": sma20_series, "sma50": sma50_series,
             "rsi": rsi_series, "macd_line": macd_line, "macd_signal": macd_signal,
             "moving_average_20": ma20_tool, "moving_average_50": ma50_tool,
-            "latest_price": latest_price, "ltp_date": ltp_date, "ltp_age_days": ltp_age_days,
+            "latest_price": cmp_price, "eod_close": eod_close, "ltp_date": ltp_date, "ltp_age_days": ltp_age_days,
+            "cmp": cmp_price, "cmp_source": cmp_info["source"], "cmp_as_of": cmp_info["as_of"], "cmp_age_seconds": cmp_info["age_seconds"],
+            "cmp_change_pct": cmp_info["change_pct"], "cmp_note": cmp_info["note"], "cmp_check": cmp_check, "buy_price": buy_price,
             "annual_vol_pct": None if (vol := allocation.annual_vol(closes)) is None else round(vol * 100, 1),
             "trade_signal": trade_signal, "week52": w52, "hold": hold, "corporate_adjustments": adjustments,
+            "sr_signal": sr_signal, "sr_cmp_check": sr_check, "sr_hold": sr_hold,
+            "model_agreement": technical.compare_signals(trade_signal, sr_signal),
             "ca_status": ca["status"], "ca_notes": ca["notes"],
         })
         _fill_position(entry)
@@ -794,6 +889,8 @@ async def _analyze_one(url: str, stock: StockAllocation, today: str) -> dict[str
 
 @app.post("/api/analyze")
 async def analyze(req: AnalyzeRequest, user: dict = Depends(auth.current_user)):
+    if req.signal_model not in ("trend", "sr"):
+        raise HTTPException(400, "signal_model must be 'trend' or 'sr'.")
     url = _server_url(ANALYSIS_SERVER)
     today = dt.date.today().isoformat()
     sem = asyncio.Semaphore(ANALYSIS_CONCURRENCY)
@@ -809,7 +906,7 @@ async def analyze(req: AnalyzeRequest, user: dict = Depends(auth.current_user)):
     if req.mode == "suggested" and ok and req.total_capital > 0:
         sugg, cash = allocation.suggest(
             [{"symbol": r["symbol"], "vol": (r["annual_vol_pct"] / 100) if r.get("annual_vol_pct") else None,
-              "signal": r["trade_signal"].get("signal")} for r in ok],
+              "signal": (r["sr_signal"] if req.signal_model == "sr" else r["trade_signal"]).get("signal")} for r in ok],
             max(5.0, min(req.max_weight_pct, 100.0)))
         for r in ok:
             w = sugg[r["symbol"]]
@@ -838,8 +935,13 @@ async def analyze(req: AnalyzeRequest, user: dict = Depends(auth.current_user)):
         if unallocated is not None:
             unallocated = {"pct": round(cash * 100, 1), "amount": round(cash * plan["exposure"], 2)}
     for r in ok:
-        r["funding"] = funding.stock_funding(r, rules, req.use_mtf)
+        view = r
+        if req.signal_model == "sr":      # size and cost the support/resistance setup instead of the trend one
+            ok_now = r.get("sr_cmp_check") and r["sr_cmp_check"]["status"] == "ok"
+            view = {**r, "trade_signal": r["sr_signal"], "hold": r["sr_hold"], "buy_price": r["cmp"] if ok_now else None}
+        r["funding"] = funding.stock_funding(view, rules, req.use_mtf)
     fsum = funding.summarize(ok, req.total_capital, plan, req.mtf_limit, req.use_mtf, rules)
+    fsum["signal_model"] = req.signal_model
     return {"mode": "suggested" if unallocated is not None else "equal", "unallocated": unallocated,
             "funding": fsum, "results": results}
 
@@ -868,6 +970,8 @@ async def _fetch_history_adjusted(url: str, symbol: str, total_months: int, part
 @app.post("/api/recommend")
 async def recommend_stocks(req: RecommendRequest, user: dict = Depends(auth.current_user)):
     """One scan per user at a time, and only NSE_HEAVY_JOBS across everyone: the rest wait their turn."""
+    if req.model not in recommend.MODELS:
+        raise HTTPException(400, f"model must be one of {list(recommend.MODELS)}.")
     if user["id"] in _scanning:
         raise HTTPException(409, "You already have a scan running. Wait for it to finish.")
     _scanning.add(user["id"])
@@ -881,7 +985,7 @@ async def recommend_stocks(req: RecommendRequest, user: dict = Depends(auth.curr
 async def _recommend_inner(req: RecommendRequest, user: dict):
     url = _server_url(ANALYSIS_SERVER)
     try:
-        result = await recommend.recommend(url, req.existing, req.budget, _fetch_history_adjusted, _call_tool)
+        result = await recommend.recommend(url, req.existing, req.budget, _fetch_history_adjusted, _call_tool, price_lookup=get_cmp, model=req.model)
         sem = asyncio.Semaphore(ANALYSIS_CONCURRENCY)
 
         async def enrich(p: dict[str, Any]) -> None:
@@ -890,7 +994,8 @@ async def _recommend_inner(req: RecommendRequest, user: dict):
                     recs = await _fetch_history_adjusted(url, p["symbol"], ANALYSIS_HISTORY_MONTHS, partial_ok=True)
                     sig = {"signal": "LONG", "entry": p["entry"], "stop_loss": p["stop_loss"], "target": p["target"]}
                     p["week52"] = holding.week52(recs)
-                    p["hold"] = holding.propose(sig, recs, p["week52"])
+                    p["hold"] = holding.propose(sig, recs, p["week52"], model=p.get("model", "trend"))
+                    _apply_cmp_to_week52(p["week52"], p.get("cmp"), {"source": p.get("cmp_source"), "as_of_iso": None})
                     if p["hold"]["status"] == "proposed":
                         p["hold_days"] = p["hold"]["days"]
                 except Exception as exc:  # noqa: BLE001 - suggestions still show without these extras
@@ -912,6 +1017,7 @@ class BacktestRequest(BaseModel):
     months: int = 12
     max_hold: int = 20
     cost_pct: float = 0.2
+    strategy: str = "trend"       # "trend" (SMA/MACD/RSI) or "sr" (support and resistance)
 
 
 @app.post("/api/backtest")
@@ -923,6 +1029,9 @@ async def run_backtest(req: BacktestRequest):
     months = max(6, min(req.months, 24))
     max_hold = max(2, min(req.max_hold, 120))
     cost = max(0.0, min(req.cost_pct, 5.0))
+    if req.strategy not in ("trend", "sr"):
+        raise HTTPException(400, "strategy must be 'trend' or 'sr'.")
+    signal_fn = sr_model.signal_from_prepared if req.strategy == "sr" else None
     sem = asyncio.Semaphore(ANALYSIS_CONCURRENCY)
 
     async def one(sym: str) -> dict[str, Any]:
@@ -931,13 +1040,13 @@ async def run_backtest(req: BacktestRequest):
                 records = await _fetch_history_adjusted(url, sym, months)
                 if not records:
                     raise ValueError("No price history returned.")
-                return {"symbol": sym, **backtest.run(records, max_hold, cost)}
+                return {"symbol": sym, **backtest.run(records, max_hold, cost, signal_fn=signal_fn)}
             except Exception as exc:  # noqa: BLE001
                 return {"symbol": sym, "error": _describe_error(exc)}
 
     results = await asyncio.gather(*(one(s) for s in symbols))
     ok = [r for r in results if "error" not in r]
-    return {"params": {"months": months, "max_hold": max_hold, "cost_pct": cost},
+    return {"params": {"months": months, "max_hold": max_hold, "cost_pct": cost, "strategy": req.strategy},
             "results": results, "pooled": backtest.pool(ok) if ok else None}
 
 
@@ -957,6 +1066,8 @@ class EvalEntry(BaseModel):
     taken: bool = False
     score: Optional[str] = None
     logged_at: Optional[str] = None
+    model: str = "trend"            # rule set that produced the setup: "trend" or "sr"
+    setup: Optional[str] = None
 
 
 class EvaluateRequest(BaseModel):
@@ -987,7 +1098,7 @@ async def track_evaluate(req: EvaluateRequest, user: dict = Depends(auth.current
             raise HTTPException(400, f"{sym}: need 0 < stop < entry < target.")
         if len(e.id) > 40:
             raise HTTPException(400, "An entry id is too long.")
-        entries.append({**e.model_dump(), "symbol": sym, "as_of": e.as_of[:10]})
+        entries.append({**e.model_dump(), "symbol": sym, "as_of": e.as_of[:10], "model": "sr" if e.model == "sr" else "trend"})
     if not entries:
         return {"entries": []}
 
@@ -1021,6 +1132,32 @@ async def track_evaluate(req: EvaluateRequest, user: dict = Depends(auth.current
             ev = backtest.evaluate_forward(recs, e["as_of"], e["entry"], e["stop_loss"], e["target"],
                                            max(2, min(e.get("hold_days") or max_hold, 120)), cost)
         rows.append({**e, **ev})
+
+    # Trades still open: show them at the current market price. A stop or target touched today is flagged, but the
+    # status stays as it is until the day's bars confirm it.
+    open_syms = list(dict.fromkeys(r["symbol"] for r in rows if r.get("status") in ("open", "pending")))[:MAX_LIVE_PRICES]
+    if open_syms:
+        async def price(sym: str):
+            recs = hist[sym][0] or []
+            last = recs[-1] if recs else {}
+            async with sem:
+                return sym, await get_cmp(sym, _to_float(last.get("close")), str(last.get("date", ""))[:10] or None)
+        prices = dict(await asyncio.gather(*(price(s) for s in open_syms)))
+        for r in rows:
+            info = prices.get(r["symbol"])
+            if r.get("status") not in ("open", "pending") or not info:
+                continue
+            r["price_source"], r["price_as_of"] = info["source"], info["as_of"]
+            if info["source"] not in ("live", "last_trade"):
+                continue
+            recs = hist[r["symbol"]][0]
+            closes_by_date = {str(x.get("date", ""))[:10]: _to_float(x.get("close")) for x in recs}
+            base = max((d for d in closes_by_date if d <= r["as_of"]), default=None)
+            scale = (closes_by_date[base] / r["entry"]) if base and closes_by_date[base] and r["entry"] else 1.0
+            entry, stop, target = r["entry"] * scale, r["stop_loss"] * scale, r["target"] * scale   # same basis as the adjusted prices
+            r["current_price"] = round(info["cmp"], 2)
+            r["return_pct"] = round((info["cmp"] / entry - 1) * 100, 2)
+            r["live_alert"] = "below_stop" if info["cmp"] <= stop else "at_target" if info["cmp"] >= target else None
     return {"entries": rows}
 
 

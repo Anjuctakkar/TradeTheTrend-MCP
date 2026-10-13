@@ -81,7 +81,7 @@
   function welcome() {
     add("bot", "Hi! I can look up NSE stocks, show the latest rule-based setup, backtest it, and show today's top movers. What would you like to see?");
     var chips = el("div", "chips");
-    ["Analyse TCS", "Backtest INFY", "Today's top gainers and losers"].forEach(function (q) {
+    ["Analyse TCS", "Support and resistance for TCS", "Backtest INFY", "Today's top gainers and losers"].forEach(function (q) {
       var c = el("button", "chip", q); c.type = "button"; c.onclick = function () { chips.remove(); ask(q); }; chips.appendChild(c);
     });
     log.appendChild(chips);

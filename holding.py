@@ -32,6 +32,7 @@ import statistics
 from typing import Any, Optional
 
 import backtest
+import sr_model
 
 HOLD_CAP = 40        # trading days; longer than this -> no proposal
 MIN_TRADES = 5       # closed trades needed to cross-check against history
@@ -76,8 +77,10 @@ def week52(records: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def propose(signal: dict[str, Any], records: list[dict[str, Any]], w52: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-    """signal: a generate_trade_signal() result (needs signal/entry/stop_loss/target for LONG)."""
+def propose(signal: dict[str, Any], records: list[dict[str, Any]], w52: Optional[dict[str, Any]] = None,
+            model: str = "trend") -> dict[str, Any]:
+    """signal: a generate_trade_signal() or generate_sr_signal() result (needs signal/entry/stop_loss/target for LONG).
+    model: which rule set made it ("trend" or "sr"); the history cross-check replays that same rule set."""
     out: dict[str, Any] = {"status": "none", "days": None, "review_by": None, "confidence": None,
                            "reasoning": [], "evidence": {}}
     why = out["reasoning"]
@@ -117,7 +120,7 @@ def propose(signal: dict[str, Any], records: list[dict[str, Any]], w52: Optional
         return out
 
     try:
-        bt = backtest.run(records, HOLD_CAP, 0.2)
+        bt = backtest.run(records, HOLD_CAP, 0.2, signal_fn=sr_model.signal_from_prepared if model == "sr" else None)
         closed = [t for t in bt["trades"] if t["reason"] != "open"]
     except ValueError:
         closed = []

@@ -188,7 +188,7 @@
 <body>
 
 <div class="topbar">
-  <div class="brand">NSE MCP Dashboard<small>Bhavcopy and CM market data</small></div>
+  <div class="brand">NSE MCP Dashboard<small>Bhavcopy and CM market data · S/R build 2026-10-13</small></div>
   <nav class="tabs">
     <div class="tab active" data-view="analysis">Portfolio analysis</div>
     <div class="tab" data-view="eval">Evaluation</div>
@@ -216,6 +216,8 @@
         <div class="hint" style="margin-top:0">Tick stocks in the list, then run. Stocks you ticked <b>Eval</b> on in Portfolio analysis are already ticked.</div>
         <label for="btMonths">History</label>
         <select id="btMonths"><option value="12">12 months</option><option value="18">18 months</option><option value="24">24 months</option><option value="6">6 months</option></select>
+        <label for="btStrategy">Rule set</label>
+        <select id="btStrategy"><option value="trend">Trend and momentum</option><option value="sr">Support and resistance</option></select>
         <label for="btHold">Maximum holding period (trading days)</label>
         <input type="number" id="btHold" value="20" min="2" max="120" />
         <label for="btCost">Round-trip cost (%)</label>
@@ -363,6 +365,8 @@
           <input type="number" id="anMtfLimit" min="0" placeholder="No limit" />
           <div class="hint" id="anMtfHint"></div>
         </div>
+        <label for="anSignalModel">Sizing and funding use</label>
+        <select id="anSignalModel"><option value="trend">Trend and momentum setup</option><option value="sr">Support and resistance setup</option></select>
         <label for="anAllocMode">How to split it</label>
         <select id="anAllocMode">
           <option value="equal">Equal split</option>
@@ -391,7 +395,7 @@
   </div>
 </section>
 
-<script src="/eval-store.js"></script>
+<script src="/eval-store.js?v=sr20261013"></script>
 <script>
 /* ---------- sign-in: send people back to the login page when the session ends ---------- */
 (() => {
@@ -602,8 +606,15 @@ anTotalCapital.addEventListener("input", updateSplitHint);
 function setResolved(input, matchBox, r) {
   input.dataset.resolved = r.symbol;
   const chg = r.pct_change > 0 ? "+" + r.pct_change : r.pct_change;
-  matchBox.innerHTML = `<span class="match-ok">✓ ${escapeHtml(r.symbol)}</span> <span class="match-meta">₹${r.last_close} (${chg}%)</span>`;
+  matchBox.innerHTML = `<span class="match-ok">✓ ${escapeHtml(r.symbol)}</span> <span class="match-meta">₹${r.last_close} (${chg}%) end-of-day</span>`;
   updateSplitHint();
+  // Swap in the current market price when the live feed has one.
+  fetch(`/api/cmp?symbols=${encodeURIComponent(r.symbol)}`).then(x => x.ok ? x.json() : null).then(d => {
+    const p = d && d.prices && d.prices[r.symbol];
+    if (!p || p.cmp == null || !["live", "last_trade"].includes(p.source) || input.dataset.resolved !== r.symbol) return;
+    const c = p.change_pct;
+    matchBox.innerHTML = `<span class="match-ok">✓ ${escapeHtml(r.symbol)}</span> <span class="match-meta">₹${p.cmp}${c != null ? " (" + (c > 0 ? "+" : "") + c + "%)" : ""} ${p.source === "live" ? "live" : "last trade"}</span>`;
+  }).catch(() => {});
 }
 
 async function lookupSymbol(input, matchBox) {
@@ -687,7 +698,7 @@ analyzeBtn.addEventListener("click", async () => {
   const stocks = symbols.map(symbol => ({ symbol, allocation: perStock }));
 
   const payload = { stocks, mode: document.getElementById("anAllocMode").value, total_capital: totalCapital, max_weight_pct: parseFloat(document.getElementById("anMaxWeight").value) || 35,
-    use_mtf: document.getElementById("anFunding").value === "mtf", mtf_limit: parseFloat(document.getElementById("anMtfLimit").value) || null };
+    signal_model: document.getElementById("anSignalModel").value, use_mtf: document.getElementById("anFunding").value === "mtf", mtf_limit: parseFloat(document.getElementById("anMtfLimit").value) || null };
 
   analyzeBtn.disabled = true;
   anStatus.textContent = "Fetching data and computing indicators…";
@@ -730,6 +741,8 @@ function renderRecommendPanel() {
   panel.innerHTML = `<h2>Suggestions</h2>
     <label>Extra budget to deploy (₹)</label>
     <input type="number" class="recBudget" min="0" value="100000" />
+    <label>Rule set</label>
+    <select class="recModel"><option value="trend">Trend and momentum</option><option value="sr">Support and resistance</option><option value="either">Either</option></select>
     <div class="hint">${ok.length ? `Using your ${ok.length} analysed stock(s) to avoid overlap.` : "No analysed holdings yet, so correlation with your portfolio is skipped. Run an analysis first for a better ranking."}</div>
     <div class="hint">Scans the 30 most-traded NSE names for LONG setups, ranks by rule score and low correlation with your holdings. Mechanical screen only, not advice.</div>
     <button class="primary recBtn">Suggest stocks</button>
@@ -743,19 +756,21 @@ function renderRecommendPanel() {
     try {
       const existing = ok.map(r => ({ symbol: r.symbol, dates: r.dates, close: r.close }));
       const res = await fetch("/api/recommend", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ budget: parseFloat(panel.querySelector(".recBudget").value) || 0, existing }) });
+        body: JSON.stringify({ budget: parseFloat(panel.querySelector(".recBudget").value) || 0, existing, model: panel.querySelector(".recModel").value }) });
       const d = await res.json();
       if (!res.ok) throw new Error(d.detail || res.statusText);
       st.textContent = `Scanned ${d.scanned}, ${d.longs_found} long setup(s).` + (d.note ? " " + d.note : "");
       let savedIds = [];
+      if ((d.skipped_by_price || []).length) st.textContent += " Skipped because the price has already moved: " + d.skipped_by_price.map(x => `${x.symbol} (${x.reason})`).join(", ") + ".";
       if (d.picks.length) {
         await evalReady;
-        savedIds = evalStore.add(d.picks.map(p => ({ symbol: p.symbol, as_of: String(p.as_of).slice(0, 10), entry: p.entry, stop_loss: p.stop_loss, target: p.target, score: p.score, hold_days: p.hold_days ?? null })), "system").ids;
+        savedIds = evalStore.add(d.picks.map(p => ({ symbol: p.symbol, as_of: String(p.as_of).slice(0, 10), entry: p.entry, stop_loss: p.stop_loss, target: p.target, score: p.score, hold_days: p.hold_days ?? null, model: p.model, setup: p.setup })), "system").ids;
       }
-      if (d.picks.length) out.innerHTML = `<div class="panel"><h2>Suggested additions</h2><div class="result-scroll"><table><thead><tr><th>Symbol</th><th>Score</th><th>RSI</th><th>Corr. to portfolio</th><th>Entry</th><th>Stop</th><th>Target</th><th>Hold</th><th>52w low</th><th>52w high</th><th>Qty</th><th>Invested</th></tr></thead><tbody>${d.picks.map(p => `<tr><td>${escapeHtml(p.symbol)}</td><td>${p.score}</td><td>${p.rsi}</td><td>${p.correlation ?? "—"}</td><td>₹${p.entry}</td><td>₹${p.stop_loss}</td><td>₹${p.target}</td><td>${holdShort(p.hold)}</td><td>${p.week52?.status === "ok" ? fmtMoney(p.week52.low) : "—"}</td><td>${p.week52?.status === "ok" ? fmtMoney(p.week52.high) : "—"}</td><td>${p.quantity}</td><td>₹${p.invested.toLocaleString("en-IN")}</td></tr>`).join("")}</tbody></table></div><details class="trades"><summary>Why these holding periods</summary>${d.picks.map(p => `<div style="margin:8px 0"><b>${escapeHtml(p.symbol)}</b>: ${p.hold?.status === "proposed" ? "about " + p.hold.days + " trading days" : "none proposed"}<ul class="signal-reasons">${(p.hold?.reasoning || []).map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul></div>`).join("")}</details><button class="linkish btPicks" style="width:auto;padding:8px 14px">Backtest these picks</button><div class="hint">These are saved to your Evaluation list as System picks, on this computer and not on the server, so you can check how they play out.</div></div>`;
+      if (d.picks.length) out.innerHTML = `<div class="panel"><h2>Suggested additions</h2><div class="result-scroll"><table><thead><tr><th>Symbol</th><th>Rule set</th><th>Score</th><th>RSI</th><th>Corr. to portfolio</th><th>Entry</th><th>CMP</th><th>Stop</th><th>Target</th><th>Hold</th><th>52w low</th><th>52w high</th><th>Qty</th><th>Invested</th></tr></thead><tbody>${d.picks.map(p => `<tr><td>${escapeHtml(p.symbol)}</td><td>${modelBadge(p)}</td><td>${p.score}</td><td>${p.rsi}</td><td>${p.correlation ?? "—"}</td><td>₹${p.entry}</td><td>${p.cmp != null ? "₹" + p.cmp + (p.cmp_source === "live" ? ' <span class="badge target">live</span>' : p.cmp_source === "eod" ? ' <span class="badge expired" title="Live price unavailable">EOD</span>' : "") : "—"}</td><td>₹${p.stop_loss}</td><td>₹${p.target}</td><td>${holdShort(p.hold)}</td><td>${p.week52?.status === "ok" ? fmtMoney(p.week52.low) : "—"}</td><td>${p.week52?.status === "ok" ? fmtMoney(p.week52.high) : "—"}</td><td>${p.quantity}</td><td>₹${p.invested.toLocaleString("en-IN")}</td></tr>`).join("")}</tbody></table></div><details class="trades"><summary>Why these holding periods</summary>${d.picks.map(p => `<div style="margin:8px 0"><b>${escapeHtml(p.symbol)}</b>: ${p.hold?.status === "proposed" ? "about " + p.hold.days + " trading days" : "none proposed"}<ul class="signal-reasons">${(p.hold?.reasoning || []).map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul></div>`).join("")}</details><button class="linkish btPicks" style="width:auto;padding:8px 14px">Backtest these picks</button><div class="hint">Quantity and invested use the current market price (CMP), and setups already past their stop or target at that price are skipped. These are saved to your Evaluation list as System picks, on this computer and not on the server, so you can check how they play out.</div></div>`;
       out.querySelector(".btPicks")?.addEventListener("click", () => {
         evalSelected.clear();
         savedIds.forEach(id => evalSelected.add(id));
+        document.getElementById("btStrategy").value = d.picks.every(p => p.model === "sr") ? "sr" : "trend";
         document.querySelector('.tab[data-view="eval"]').click();
         loadEvalList().then(runBacktest);
       });
@@ -764,9 +779,73 @@ function renderRecommendPanel() {
   });
 }
 
+const SETUP_LABEL = { trend_momentum: "Trend", support_bounce: "S/R bounce", resistance_breakout: "S/R breakout" };
+const modelBadge = p => `<span class="badge ${p.model === "sr" ? "src-user" : "src-system"}" title="${p.model === "sr" ? "Support and resistance rules" : "Trend and momentum rules"}">${SETUP_LABEL[p.setup] || (p.model === "sr" ? "S/R" : "Trend")}</span>`;
+/** Nearest support (green) and resistance (red) zones as dashed lines on the price chart. */
+function srLines(r) {
+  const lv = r.sr_signal && r.sr_signal.levels;
+  if (!lv) return [];
+  const line = (z, kind) => ({ label: `${kind === "S" ? "Support" : "Resistance"} ${z.level} (${z.touches}x)`, data: r.dates.map(() => z.level),
+    borderColor: kind === "S" ? "#5fd4a0" : "#f08a8a", borderDash: [6, 4], pointRadius: 0, borderWidth: 1, tension: 0 });
+  return [...(lv.support || []).slice(0, 2).map(z => line(z, "S")), ...(lv.resistance || []).slice(0, 2).map(z => line(z, "R"))];
+}
+function srCell(r) {
+  const s = r.sr_signal;
+  if (!s) return "—";
+  return s.signal === "LONG" ? `<b style="color:var(--accent)">LONG</b> <span class="hint" style="margin:0">${SETUP_LABEL[s.setup] || ""}</span>` : `<span style="color:var(--muted)">No trade</span>`;
+}
+/** The support/resistance rule set's box, shown under the trend and momentum box. */
+function renderSrSignal(r) {
+  const s = r.sr_signal;
+  if (!s) return "";
+  const lv = s.levels || {};
+  const zones = a => (a || []).map(z => `₹${z.level} (${z.touches} touches)`).join(", ") || "none found";
+  const levels = `<div class="hint" style="margin:8px 0 0">Support: ${zones(lv.support)}<br>Resistance: ${zones(lv.resistance)}${lv.atr != null ? `<br>Average true range (ATR): ₹${lv.atr}` : ""}</div>`;
+  const agree = r.model_agreement ? `<div class="hint" style="margin:6px 0 0">${escapeHtml(r.model_agreement.note)}</div>` : "";
+  const reasons = (s.reasons || []).map(x => `<li>${escapeHtml(x)}</li>`).join("");
+  if (s.signal !== "LONG") {
+    return `<div class="signal-box no-trade"><span class="signal-badge no-trade">S/R NO TRADE</span><span style="font-size:12px;color:var(--muted)">${s.score ? "Rule score " + s.score + " — setup not supported" : "No setup"}</span>
+      <ul class="signal-reasons">${reasons}</ul>${levels}${agree}</div>`;
+  }
+  const h = r.sr_hold || {};
+  const hold = `<div class="hint" style="margin:6px 0 0">Holding period: ${h.status === "proposed" ? `about ${h.days} trading days, check back around ${fmtDate(h.review_by)}` : "none proposed"}.</div>` +
+    ((h.reasoning || []).length ? `<details class="trades"><summary>Why this holding period</summary><ul class="signal-reasons">${h.reasoning.map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul></details>` : "");
+  return `<div class="signal-box long">
+    <span class="signal-badge long">S/R LONG SETUP</span><span style="font-size:12px;color:var(--muted)">${SETUP_LABEL[s.setup] || ""} · Rule score ${s.score}</span>
+    <div class="signal-figures">
+      <div><div class="label">Entry</div><div class="value">₹${s.entry}</div></div>
+      <div><div class="label">Stop loss</div><div class="value" style="color:var(--danger)">₹${s.stop_loss}</div></div>
+      <div><div class="label">Target</div><div class="value" style="color:var(--accent)">₹${s.target}</div></div>
+      <div><div class="label">Risk / share</div><div class="value">₹${s.risk_per_share}</div></div>
+      <div><div class="label">Reward : Risk</div><div class="value">${s.reward_risk_ratio}</div></div>
+    </div>
+    ${renderCmpLine({ ...r, cmp_check: r.sr_cmp_check })}
+    ${hold}
+    <ul class="signal-reasons">${reasons}</ul>${levels}${agree}</div>`;
+}
+
 function fmtDate(iso) {
   const d = new Date(String(iso).slice(0, 10) + "T00:00:00");
   return isNaN(d) ? escapeHtml(iso ?? "—") : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+}
+const CMP_SRC = { live: "live", last_trade: "last trade", eod: "end-of-day close", none: "no price" };
+const shortStamp = t => String(t || "").replace(/^(\d{2} \w{3}) \d{4} (\d{2}:\d{2}):\d{2}$/, "$1 $2");
+/** Where the current market price came from and when, as a small badge plus the time. */
+function cmpAsOf(r) {
+  const src = r.cmp_source || "eod";
+  const when = src === "eod" ? fmtDate(r.ltp_date) : shortStamp(r.cmp_as_of);
+  const cls = src === "live" ? "target" : src === "eod" ? "expired" : "";
+  return `<span class="badge ${cls}" ${r.cmp_note ? `title="${escapeHtml(r.cmp_note)}"` : ""}>${CMP_SRC[src] || src}</span> ${escapeHtml(when || "")}`;
+}
+/** Does the setup (levels from the last close) still hold at today's price? */
+function renderCmpLine(r) {
+  const c = r && r.cmp_check;
+  if (!c) return "";
+  const src = CMP_SRC[r.cmp_source || "eod"] || "";
+  const move = c.pct_from_entry == null ? "" : `${c.pct_from_entry >= 0 ? "+" : "−"}${Math.abs(c.pct_from_entry)}% from the entry`;
+  if (c.status === "below_stop") return `<p class="caveat warn" style="margin:8px 0 0">The current price ₹${r.cmp} (${src}) is already at or below the stop, so this setup no longer applies as written.</p>`;
+  if (c.status === "above_target") return `<p class="caveat warn" style="margin:8px 0 0">The current price ₹${r.cmp} (${src}) has already reached the target, so this setup no longer applies as written.</p>`;
+  return `<p class="caveat" style="margin:8px 0 0">Current price ₹${r.cmp} (${src}): ${move}${c.reward_risk_now != null ? `, reward:risk ${c.reward_risk_now} if bought now` : ""}. The entry, stop and target come from the last close and change once a day.</p>`;
 }
 function ltpDateHtml(r) {
   if (!r.ltp_date) return "—";
@@ -815,6 +894,7 @@ function renderFundingPanel(ok, fs) {
   let html = `<div class="panel"><h2>${fs.mtf ? "Funding and net P/L (own money + MTF)" : "Charges and net P/L"}</h2>
     <div class="summary-cards compact" style="margin-bottom:10px">${cards.map(([l, v]) => `<div class="summary-card"><div class="label">${l}</div><div class="value">${v}</div></div>`).join("")}</div>`;
   if (fs.mtf && fs.limit_binding) html += `<p class="caveat warn" style="margin:0 0 8px">Your MTF limit of ${rupee(fs.mtf_limit)} is the binding limit, so ${rupee(fs.unused_own)} of your own capital is not deployed. Raise the limit to use it.</p>`;
+  if (fs.signal_model === "sr") html += `<p class="caveat" style="margin:0 0 8px">Net outcomes and the suggested split use the support/resistance setup: its entry, stop, target and holding period.</p>`;
   if (!fs.rules_customised) html += `<p class="caveat warn" style="margin:0 0 8px">Brokerage, DP and pledge charges are placeholder values. Set your broker's in Settings > Funding rules for accurate net figures.</p>`;
   html += `<div class="result-scroll"><table class="compact"><thead><tr><th>Stock</th>${fs.mtf ? "<th class='r'>Own margin</th>" : ""}<th class="r">Position</th><th class="r">Own money</th>${fs.mtf ? "<th class='r'>Funded</th><th class='r'>Interest/day</th>" : ""}<th class="r">Hold used</th><th class="r">Break-even</th><th class="r">Net at target</th><th class="r">Net at stop</th><th class="r">Net R:R</th></tr></thead><tbody>${
     rows.map(r => { const f = r.funding, o = f.outcomes;
@@ -854,12 +934,12 @@ function renderCaNotes(r) {
   return `<div class="hint" style="margin-bottom:8px">Corporate actions (ex-date in window):<ul class="signal-reasons">${items}</ul>${adj}</div>`;
 }
 
-function renderSignal(sig) {
+function renderSignal(sig, r) {
   if (!sig) return "";
   const reasons = (sig.reasons || []).map(r => `<li>${escapeHtml(r)}</li>`).join("");
   if (sig.signal === "LONG") {
     return `<div class="signal-box long">
-      <span class="signal-badge long">LONG SETUP</span><span style="font-size:12px;color:var(--muted)">Rule score ${sig.score}</span>
+      <span class="signal-badge long">TREND LONG SETUP</span><span style="font-size:12px;color:var(--muted)">Rule score ${sig.score}</span>
       <div class="signal-figures">
         <div><div class="label">Entry</div><div class="value">₹${sig.entry}</div></div>
         <div><div class="label">Stop loss</div><div class="value" style="color:var(--danger)">₹${sig.stop_loss}</div></div>
@@ -867,11 +947,12 @@ function renderSignal(sig) {
         <div><div class="label">Risk / share</div><div class="value">₹${sig.risk_per_share}</div></div>
         <div><div class="label">Reward : Risk</div><div class="value">${sig.reward_risk_ratio}</div></div>
       </div>
+      ${renderCmpLine(r)}
       <ul class="signal-reasons">${reasons}</ul>
     </div>`;
   }
   return `<div class="signal-box no-trade">
-    <span class="signal-badge no-trade">NO TRADE</span><span style="font-size:12px;color:var(--muted)">${sig.score ? "Rule score " + sig.score + " — setup not supported" : "Insufficient data"}</span>
+    <span class="signal-badge no-trade">TREND: NO TRADE</span><span style="font-size:12px;color:var(--muted)">${sig.score ? "Rule score " + sig.score + " — setup not supported" : "Insufficient data"}</span>
     <ul class="signal-reasons">${reasons}</ul>
   </div>`;
 }
@@ -899,12 +980,12 @@ function renderAnalysis(results, mode, unallocated, fsum) {
   }
   html += renderFundingPanel(ok, fsum);
   html += `<div class="panel"><h2>Summary</h2><div class="result-scroll"><table>
-    <thead><tr><th>Symbol</th><th>Weight</th><th>Allocated</th><th>LTP</th><th>LTP date</th><th>Qty</th><th>Invested</th><th>Leftover</th><th>Signal</th><th>Entry</th><th>Stop loss</th><th>Target</th><th>Hold</th><th>52w low</th><th>52w high</th></tr></thead>
+    <thead><tr><th>Symbol</th><th>Weight</th><th>Allocated</th><th>CMP</th><th>CMP as of</th><th>Qty</th><th>Invested</th><th>Leftover</th><th>Trend signal</th><th>Entry</th><th>Stop loss</th><th>Target</th><th>Hold</th><th>52w low</th><th>52w high</th><th>S/R signal</th></tr></thead>
     <tbody>${results.map(r => r.error
-      ? `<tr><td>${escapeHtml(r.symbol)}</td><td colspan="14" style="color:var(--danger)">${escapeHtml(r.error)}</td></tr>`
-      : `<tr><td>${escapeHtml(r.symbol)}${(r.corporate_adjustments||[]).length ? ' <span title="Split/bonus adjusted" style="color:#e8b84b">CA</span>' : ''}</td><td>${r.weight_pct != null ? r.weight_pct + "%" : "—"}</td><td>₹${(r.allocation||0).toLocaleString("en-IN")}</td><td>${r.latest_price ?? "—"}</td><td>${ltpDateHtml(r)}</td><td>${r.quantity ?? "—"}</td><td>₹${(r.invested||0).toLocaleString("en-IN")}</td><td>₹${(r.leftover||0).toLocaleString("en-IN")}</td>
+      ? `<tr><td>${escapeHtml(r.symbol)}</td><td colspan="15" style="color:var(--danger)">${escapeHtml(r.error)}</td></tr>`
+      : `<tr><td>${escapeHtml(r.symbol)}${(r.corporate_adjustments||[]).length ? ' <span title="Split/bonus adjusted" style="color:#e8b84b">CA</span>' : ''}</td><td>${r.weight_pct != null ? r.weight_pct + "%" : "—"}</td><td>₹${(r.allocation||0).toLocaleString("en-IN")}</td><td>${r.latest_price ?? "—"}${r.cmp_change_pct != null ? ` <span class="${r.cmp_change_pct >= 0 ? "pos" : "neg"}" style="font-size:12px">${r.cmp_change_pct >= 0 ? "+" : "−"}${Math.abs(r.cmp_change_pct)}%</span>` : ""}</td><td>${cmpAsOf(r)}</td><td>${r.quantity ?? "—"}</td><td>₹${(r.invested||0).toLocaleString("en-IN")}</td><td>₹${(r.leftover||0).toLocaleString("en-IN")}</td>
           <td>${r.trade_signal?.signal === "LONG" ? "<b style='color:var(--accent)'>LONG</b>" : "<span style='color:var(--muted)'>No trade</span>"}</td>
-          <td>${r.trade_signal?.entry ?? "—"}</td><td>${r.trade_signal?.stop_loss ?? "—"}</td><td>${r.trade_signal?.target ?? "—"}</td><td>${holdShort(r.hold)}</td><td>${r.week52?.status === "ok" ? fmtMoney(r.week52.low) : "—"}</td><td>${r.week52?.status === "ok" ? fmtMoney(r.week52.high) : "—"}</td></tr>`
+          <td>${r.trade_signal?.entry ?? "—"}</td><td>${r.trade_signal?.stop_loss ?? "—"}</td><td>${r.trade_signal?.target ?? "—"}</td><td>${holdShort(r.hold)}</td><td>${r.week52?.status === "ok" ? fmtMoney(r.week52.low) : "—"}</td><td>${r.week52?.status === "ok" ? fmtMoney(r.week52.high) : "—"}</td><td>${srCell(r)}</td></tr>`
     ).join("")}</tbody>
   </table></div></div>`;
 
@@ -916,9 +997,10 @@ function renderAnalysis(results, mode, unallocated, fsum) {
     card.className = "stock-card";
     card.innerHTML = `
       <h3>${escapeHtml(r.symbol)}</h3>
-      <div class="meta">${r.weight_pct != null ? "Weight " + r.weight_pct + "% · " : ""}${r.annual_vol_pct != null ? "Volatility " + r.annual_vol_pct + "% a year · " : ""}LTP ₹${r.latest_price} as of ${ltpDateHtml(r)} · MA20 ₹${r.moving_average_20 ?? "—"} · MA50 ₹${r.moving_average_50 ?? "—"} · Qty ${r.quantity ?? "—"} · Invested ₹${(r.invested||0).toLocaleString("en-IN")} · Leftover ₹${(r.leftover||0).toLocaleString("en-IN")}</div>
+      <div class="meta">${r.weight_pct != null ? "Weight " + r.weight_pct + "% · " : ""}${r.annual_vol_pct != null ? "Volatility " + r.annual_vol_pct + "% a year · " : ""}CMP ₹${r.latest_price} (${cmpAsOf(r)}) · signals from the close of ${ltpDateHtml(r)} · MA20 ₹${r.moving_average_20 ?? "—"} · MA50 ₹${r.moving_average_50 ?? "—"} · Qty ${r.quantity ?? "—"} · Invested ₹${(r.invested||0).toLocaleString("en-IN")} · Leftover ₹${(r.leftover||0).toLocaleString("en-IN")}</div>
       ${renderCaNotes(r)}
-      ${renderSignal(r.trade_signal)}
+      ${renderSignal(r.trade_signal, r)}
+      ${renderSrSignal(r)}
       ${renderRangeAndHold(r)}
       ${renderCostBox(r)}
       <div class="chart-wrap"><canvas></canvas></div>
@@ -935,6 +1017,7 @@ function renderAnalysis(results, mode, unallocated, fsum) {
           { label: "Close", data: r.close, borderColor: "#4f8cff", pointRadius: 0, borderWidth: 1.5, tension: 0.1 },
           { label: "SMA20", data: r.sma20, borderColor: "#3fb984", pointRadius: 0, borderWidth: 1.5, tension: 0.1 },
           { label: "SMA50", data: r.sma50, borderColor: "#e8b84b", pointRadius: 0, borderWidth: 1.5, tension: 0.1 },
+          ...srLines(r),
         ],
       },
       options: {
@@ -985,12 +1068,17 @@ document.querySelector('.tab[data-view="eval"]').addEventListener("click", () =>
 async function addTickedToEvaluation(results, inputs) {
   const ticked = new Set(inputs.filter(i => i.closest(".stock-wrap").querySelector(".stockEval").checked).map(i => i.dataset.resolved));
   if (!ticked.size) return null;
-  const items = results.filter(r => !r.error && ticked.has(r.symbol)).map(r => {
-    const sig = r.trade_signal || {}, long = sig.signal === "LONG";
-    return { symbol: r.symbol, as_of: String(r.ltp_date).slice(0, 10),
-      ...(long ? { entry: sig.entry, stop_loss: sig.stop_loss, target: sig.target, score: sig.score, hold_days: r.hold && r.hold.status === "proposed" ? r.hold.days : null } : {}) };
+  const items = results.filter(r => !r.error && ticked.has(r.symbol)).flatMap(r => {
+    const as_of = String(r.ltp_date).slice(0, 10), out = [];
+    const t = r.trade_signal || {}, q = r.sr_signal || {};
+    if (t.signal === "LONG") out.push({ symbol: r.symbol, as_of, model: "trend", setup: t.setup || "trend_momentum", entry: t.entry, stop_loss: t.stop_loss, target: t.target, score: t.score,
+      hold_days: r.hold && r.hold.status === "proposed" ? r.hold.days : null });
+    if (q.signal === "LONG") out.push({ symbol: r.symbol, as_of, model: "sr", setup: q.setup, entry: q.entry, stop_loss: q.stop_loss, target: q.target, score: q.score,
+      hold_days: r.sr_hold && r.sr_hold.status === "proposed" ? r.sr_hold.days : null });
+    if (!out.length) out.push({ symbol: r.symbol, as_of, model: "trend" });   // no LONG setup from either: watch-only
+    return out;
   });
-  const failed = ticked.size - items.length;
+  const failed = ticked.size - new Set(items.map(i => i.symbol)).size;
   if (!items.length) return { added: 0, already: 0, failed };
   await evalReady;
   const r = evalStore.add(items, "user");
@@ -1017,7 +1105,7 @@ function pruneSelection() {
 
 // The assistant can discuss your list: the page hands it to the chat widget (newest 50), nothing is stored on the server.
 window.assistantContext = () => ({ watchlist: evalEntries.slice().sort((a, b) => String(b.as_of).localeCompare(String(a.as_of))).slice(0, 50)
-  .map(e => ({ symbol: e.symbol, source: e.source, as_of: e.as_of, entry: e.entry, stop_loss: e.stop_loss, target: e.target, hold_days: e.hold_days, taken: !!e.taken })) });
+  .map(e => ({ symbol: e.symbol, source: e.source, model: e.model || "trend", as_of: e.as_of, entry: e.entry, stop_loss: e.stop_loss, target: e.target, hold_days: e.hold_days, taken: !!e.taken })) });
 
 async function loadEvalList() {
   await evalReady;
@@ -1035,7 +1123,7 @@ async function refreshOutcomes() {
   try {
     const res = await fetch("/api/track/evaluate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
       entries: withLevels.map(e => ({ id: e.id, symbol: e.symbol, as_of: e.as_of, entry: e.entry, stop_loss: e.stop_loss, target: e.target,
-        source: e.source, hold_days: e.hold_days, taken: !!e.taken, score: e.score, logged_at: e.logged_at })),
+        source: e.source, hold_days: e.hold_days, taken: !!e.taken, score: e.score, logged_at: e.logged_at, model: e.model || "trend", setup: e.setup || null })),
       max_hold: +document.getElementById("btHold").value || 20, cost_pct: parseFloat(document.getElementById("btCost").value) || 0 }) });
     const d = await res.json();
     if (!res.ok) throw new Error(typeof d.detail === "string" ? d.detail : res.statusText);
@@ -1102,7 +1190,9 @@ function renderEval() {
   const tracked = rows.filter(r => r.status !== "no_setup" && (r.entry != null));
   const sum = {
     all: summarize(tracked), user: summarize(tracked.filter(r => r.source === "user")),
-    system: summarize(tracked.filter(r => r.source === "system")), taken: summarize(tracked.filter(r => r.taken)) };
+    system: summarize(tracked.filter(r => r.source === "system")), taken: summarize(tracked.filter(r => r.taken)),
+    mtrend: summarize(tracked.filter(r => r.model !== "sr")), msr: summarize(tracked.filter(r => r.model === "sr")) };
+  const nSr = rows.filter(r => r.model === "sr").length;
   const checked = evalChecked != null;
   const sumRow = (label, k, total) => { const x = sum[k]; return `<tr><td>${label}</td><td class="r">${total}</td><td class="r">${checked ? x.done : "—"}</td><td class="r">${checked ? x.target : "—"}</td><td class="r">${checked ? x.stopped : "—"}</td><td class="r">${checked ? x.open : "—"}</td><td class="r">${x.win != null ? x.win + "%" : "—"}</td><td class="r">${pct(x.avg)}</td></tr>`; };
   const shown = rows.filter(r => evalFilter === "all" || r.source === evalFilter);
@@ -1113,6 +1203,7 @@ function renderEval() {
       ${sumRow('<span class="badge src-system">System</span>', "system", count("system"))}
       ${sumRow("All", "all", count("all"))}
       ${sum.taken.n ? sumRow("You took", "taken", sum.taken.n) : ""}
+      ${nSr ? sumRow('<span class="badge src-system">Trend rules</span>', "mtrend", rows.length - nSr) + sumRow('<span class="badge src-user">S/R rules</span>', "msr", nSr) : ""}
     </tbody></table></div>
     <div class="hint">${checked ? "Outcomes as of " + evalChecked.toLocaleTimeString("en-IN") + "." : "Outcomes not checked yet. Click Refresh outcomes."} ${sum.all.done < 30 && checked ? `Only ${sum.all.done} finished, so these rates say little yet.` : ""} Stocks marked No setup had no LONG setup when added, so they can be backtested but have no outcome to track.</div></div>`;
 
@@ -1120,15 +1211,15 @@ function renderEval() {
     <span class="hint" style="margin:0 0 0 6px">Tick stocks to backtest them.</span></div>`;
 
   html += `<div class="panel" style="padding:8px 10px"><div class="result-scroll"><table class="compact"><thead><tr>
-    <th><input type="checkbox" id="evAll" aria-label="Select all shown"></th><th>Stock</th><th>By</th><th>Added</th><th>Entry / stop / target</th><th>Status</th><th class="r">Return</th><th class="r">Hold</th><th>Took</th><th></th></tr></thead><tbody>${
+    <th><input type="checkbox" id="evAll" aria-label="Select all shown"></th><th>Stock</th><th>By</th><th>Rule set</th><th>Added</th><th>Entry / stop / target</th><th>Status</th><th class="r">Return</th><th class="r">Hold</th><th>Took</th><th></th></tr></thead><tbody>${
     shown.map(r => {
       const lv = r.entry != null ? `${r.entry} / ${r.stop_loss} / ${r.target}` : "—";
       const label = r.status ? STATUS_LABEL[r.status] || r.status : "—";
       const note = r.status === "no_setup" ? "No LONG setup when added: nothing to track, backtest only" : r.error || "";
       const px = r.exit_price ?? r.current_price;
       return `<tr><td><input type="checkbox" class="evSel" data-id="${r.id}" ${evalSelected.has(r.id) ? "checked" : ""} aria-label="Select ${escapeHtml(r.symbol)}"></td>
-        <td><b>${escapeHtml(r.symbol)}</b></td><td><span class="badge src-${r.source}">${SRC_LABEL[r.source] || r.source}</span></td><td>${shortDate(r.as_of)}</td><td class="lv">${lv}</td>
-        <td>${r.status ? `<span class="badge ${r.status}" ${note ? `title="${escapeHtml(note)}"` : ""}>${label}</span>` : '<span class="hint" style="margin:0">—</span>'}${px != null && r.status ? ` <span class="hint" style="margin:0" title="${r.exit_price != null ? "Exit price" : "Current price"}">₹${px}</span>` : ""}</td>
+        <td><b>${escapeHtml(r.symbol)}</b></td><td><span class="badge src-${r.source}">${SRC_LABEL[r.source] || r.source}</span></td><td>${modelBadge({ model: r.model, setup: r.setup })}</td><td>${shortDate(r.as_of)}</td><td class="lv">${lv}</td>
+        <td>${r.status ? `<span class="badge ${r.status}" ${note ? `title="${escapeHtml(note)}"` : ""}>${label}</span>` : '<span class="hint" style="margin:0">—</span>'}${px != null && r.status ? ` <span class="hint" style="margin:0" title="${r.exit_price != null ? "Exit price" : "Current price"}">₹${px}${r.exit_price == null && r.price_source === "live" ? " live" : r.exit_price == null && r.price_source === "last_trade" ? " last trade" : ""}</span>` : ""}${r.live_alert === "below_stop" ? ` <span class="badge stopped" title="The current price is at or below the stop. The status updates once the day's bars confirm it.">below stop now</span>` : r.live_alert === "at_target" ? ` <span class="badge target" title="The current price is at or above the target. The status updates once the day's bars confirm it.">at target now</span>` : ""}</td>
         <td class="r">${r.return_pct != null ? pct(r.return_pct) : "—"}</td><td class="r">${r.hold_days ? r.hold_days + "d" : "—"}</td>
         <td><input type="checkbox" class="evTaken" data-id="${r.id}" ${r.taken ? "checked" : ""} aria-label="Taken"></td>
         <td><button class="rm" data-id="${r.id}" title="Remove from list" aria-label="Remove">✕</button></td></tr>`;
@@ -1159,7 +1250,7 @@ async function runBacktest() {
   out.innerHTML = '<div class="empty">Running backtest…</div>';
   try {
     const res = await fetch("/api/backtest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-      symbols, months: +document.getElementById("btMonths").value,
+      symbols, months: +document.getElementById("btMonths").value, strategy: document.getElementById("btStrategy").value,
       max_hold: +document.getElementById("btHold").value || 20, cost_pct: parseFloat(document.getElementById("btCost").value) || 0 }) });
     const d = await res.json();
     if (!res.ok) throw new Error(d.detail || res.statusText);
@@ -1189,7 +1280,7 @@ function renderBacktest(d, out) {
     </div>`;
     if (p.small_sample) html += `<p class="caveat warn" style="margin-top:8px">Only ${p.trades} closed trades, too few to say whether the rules have an edge.</p>`;
   }
-  html += `<p class="caveat" style="margin-top:8px">${d.params.months} months, max ${d.params.max_hold} trading days per trade, ${d.params.cost_pct}% round-trip cost, split/bonus adjusted. Entry at the signal day's close; a day touching both stop and target counts as a stop. Stocks picked because they look strong today flatter a backtest, so the outcomes above are the fairer test.</p>`;
+  html += `<p class="caveat" style="margin-top:8px">${d.params.strategy === "sr" ? "Support and resistance rules" : "Trend and momentum rules"}: ${d.params.months} months, max ${d.params.max_hold} trading days per trade, ${d.params.cost_pct}% round-trip cost, split/bonus adjusted. Entry at the signal day's close; a day touching both stop and target counts as a stop. Stocks picked because they look strong today flatter a backtest, so the outcomes above are the fairer test.</p>`;
   html += `<div class="panel" style="padding:8px 10px"><div class="result-scroll"><table class="compact"><thead><tr><th>Stock</th><th>By</th><th class="r">Trades</th><th class="r">Win rate</th><th class="r">Avg/trade</th><th class="r">Strategy</th><th class="r">Buy+hold</th><th class="r">Max drawdown</th><th class="r">In market</th><th class="r">Target/stop/time</th></tr></thead><tbody>${
     d.results.map(r => r.error ? `<tr><td><b>${escapeHtml(r.symbol)}</b></td><td>${sourcesOf(r.symbol)}</td><td colspan="8" style="color:var(--danger)">${escapeHtml(r.error)}</td></tr>`
       : `<tr><td><b>${escapeHtml(r.symbol)}</b></td><td>${sourcesOf(r.symbol)}</td><td class="r">${r.metrics.trades}${r.metrics.open_trades ? "+1" : ""}</td><td class="r">${r.metrics.win_rate ?? "—"}${r.metrics.win_rate != null ? "%" : ""}</td><td class="r">${pct(r.metrics.avg_return_pct)}</td><td class="r">${pct(r.metrics.strategy_return_pct)}</td><td class="r">${pct(r.metrics.buy_hold_return_pct)}</td><td class="r">${r.metrics.max_drawdown_pct}%</td><td class="r">${r.metrics.exposure_pct}%</td><td class="r">${r.metrics.target_hits}/${r.metrics.stop_hits}/${r.metrics.time_exits}</td></tr>`).join("")}</tbody></table></div></div>`;
@@ -1446,6 +1537,6 @@ function renderLive(d) {
 renderRecommendPanel();
 </script>
 
-<script src="/agent-widget.js" data-title="Market assistant" data-accent="#5b8def" data-settings="true" defer></script>
+<script src="/agent-widget.js?v=sr20261013" data-title="Market assistant" data-accent="#5b8def" data-settings="true" defer></script>
 </body>
 </html>

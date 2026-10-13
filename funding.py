@@ -249,7 +249,8 @@ def stock_funding(r: dict[str, Any], rules: dict[str, Any], use_mtf: bool) -> di
     proposed = h.get("status") == "proposed"
     n = h["days"] if proposed else rules["assumed_hold_days"]
     cal, review = calendar_days(r["ltp_date"], n)
-    entry, target, stop = sig["entry"], sig["target"], sig["stop_loss"]
+    # Bought at the current market price when the setup still holds there (the signal's entry is last night's close).
+    entry, target, stop = r.get("buy_price") or sig["entry"], sig["target"], sig["stop_loss"]
     on_mtf = out["mtf"]
     t_net = net_pnl(entry, target, qty, funded, cal, rules, on_mtf)
     s_net = net_pnl(entry, stop, qty, funded, cal, rules, on_mtf)
@@ -263,7 +264,7 @@ def stock_funding(r: dict[str, Any], rules: dict[str, Any], use_mtf: bool) -> di
             "target_net": _r2(t_net), "stop_net": _r2(s_net),
             "break_even": None if be is None else round(be, 2),
             "break_even_pct": None if be is None else round((be / entry - 1) * 100, 2),
-            "gross_rr": sig.get("reward_risk_ratio"),
+            "gross_rr": round((target - entry) / (entry - stop), 2) if entry > stop else sig.get("reward_risk_ratio"),
             "net_rr": round(t_net["net"] / -s_net["net"], 2) if s_net["net"] < 0 and t_net["net"] > 0 else None,
             "target_pct_own": round(t_net["net"] / own * 100, 1) if own else None,
             "stop_pct_own": round(s_net["net"] / own * 100, 1) if own else None,

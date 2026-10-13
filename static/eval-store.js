@@ -55,11 +55,14 @@
       score: typeof raw.score === "string" ? raw.score.slice(0, 8) : null,
       hold_days: hold,
       logged_at: typeof raw.logged_at === "string" ? raw.logged_at.slice(0, 25) : new Date().toISOString().slice(0, 19),
-      taken: raw.taken === true
+      taken: raw.taken === true,
+      model: raw.model === "sr" ? "sr" : "trend",
+      setup: typeof raw.setup === "string" ? raw.setup.slice(0, 24) : null
     };
   }
 
-  function keyOf(e) { return e.symbol + "|" + e.as_of + "|" + e.source; }
+  // Same stock + date + source can hold one entry per rule set. Trend keys stay as they were, so old lists merge as before.
+  function keyOf(e) { return e.symbol + "|" + e.as_of + "|" + e.source + (e.model === "sr" ? "|sr" : ""); }
   function copy(e) { return Object.assign({}, e); }
 
   /** Union by symbol + date + source. Existing entries win; "taken" is kept if either side has it. */
