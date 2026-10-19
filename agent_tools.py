@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 import backtest
 import recommend
+import sectors
 import server as core
 import sr_model
 import technical
@@ -103,6 +104,88 @@ async def market_movers(limit: int = 10, index: str = "") -> Any:
     return raw["content"]
 
 
+async def sector_momentum(sector: str = "", cap: str = "all") -> dict[str, Any]:
+    """One sector's momentum (fresh read, about a minute the first time) or a ranking of sectors already loaded."""
+    cap = cap if cap in sectors.CAPS else "all"
+    if sector.strip():
+        catalogue = sectors.load_sectors()
+        names = {n.lower(): n for n in catalogue}
+        q = sector.strip().lower()
+        name = names.get(q) or next((n for low, n in names.items() if q in low), None)
+        if not name:                                  # allow an industry group name, e.g. "banks" or "auto"
+            name = next((n for n, inds in catalogue.items() if any(q in i.lower() for i in inds)), None)
+        if not name:
+            return {"error": f"Unknown sector '{sector}'.", "sectors": list(names.values())}
+        d = await core._sector_data(name)
+        seg = d["segments"].get(cap)
+        if seg is None:
+            return {"sector": name, "note": f"No {cap} stocks in this sector."}
+        keep = [s for s in d["stocks"] if cap == "all" or (cap == "large") == (s["cap"] == "large")]
+        return {"sector": name, "cap_view": cap, "as_of": d["as_of"], "history_to": d["history_to"], "price_coverage": d["live"], "fetched_at": d["fetched_at"], "status": sectors.status(seg["metrics"]), "metrics": seg["metrics"],
+                "stocks": [{k: s[k] for k in ("symbol", "cap", "industry", "m1", "w1", "above_sma50", "trend_long", "sr_long")} for s in keep[:10]],
+                "industries": [{k: r[k] for k in ("industry", "status", "score", "w1", "m1", "m3", "breadth50")} for r in sectors.rank_industries({name: d}, cap)],
+                "not_included": d["errors"],
+                "note": "Equal-weight proxy index of the sector's stocks (not an official NSE index). 1D is the latest traded price against the previous close; history is end of day. Status is a mechanical rule on past prices."}
+    loaded = {n: v[1] for n, v in core._sector_cache.items()}
+    rows = sectors.rank(loaded, cap)
+    return {"cap_view": cap, "sectors": [{k: r[k] for k in ("name", "status", "score", "w1", "m1", "m3", "breadth50")} for r in rows],
+            "note": "Only sectors already loaded in this server are ranked. Ask about a sector by name for a fresh read." if rows
+                    else "No sectors are loaded yet. Ask about a specific sector by name, or open the Sectors tab and click Load sectors."}
+
+
+async def sector_rotation(sector: str = "", tf: str = "weekly", cap: str = "all", level: str = "sectors") -> dict[str, Any]:
+    """Which sectors are Leading, Improving, Weakening or Lagging against the others, and the early movers.
+    level 'sectors' uses the sectors already loaded in this server (no NSE calls); 'industries' needs a sector name
+    and loads that sector if it isn't loaded yet (about a minute)."""
+    tf = tf if tf in sectors.TFS else "weekly"
+    cap = cap if cap in sectors.CAPS else "all"
+    level = "industries" if level == "industries" else "sectors"
+    catalogue = sectors.load_sectors()
+    q, names = sector.strip().lower(), {n.lower(): n for n in catalogue}
+    name = (names.get(q) or next((n for low, n in names.items() if q and q in low), None)
+            or next((n for n, inds in catalogue.items() if q and any(q in i.lower() for i in inds)), None))
+    if level == "industries":
+        if not name:
+            return {"error": "Give a sector name for the industry-group view.", "sectors": list(catalogue)}
+        await core._sector_data(name)
+    loaded = {n: v[1] for n, v in core._sector_cache.items() if n in catalogue}
+    r = sectors.rotation(loaded, tf, cap, level, name or "")
+    return {"tf": tf, "cap_view": cap, "level": level, "sector": name, "benchmark": r["benchmark"], "warning": r["warning"],
+            "sectors_loaded": len(loaded), "counts": r.get("counts"), "early_movers": [i["name"] for i in r["items"] if i["early"]],
+            "items": [{k: i[k] for k in ("name", "quadrant", "prev_quadrant", "ratio", "mom", "signal", "early", "as_of")} for i in r["items"]],
+            "note": "Simplified relative-rotation view of equal-weight proxy indices against the equal-weight of the sectors loaded "
+                    "(not the Nifty 50, not the licensed RRG). The newest point includes live prices and is partial until the period ends. "
+                    "Rotations often fail: confirm with the stocks themselves."}
+
+
+async def sector_picks(sector: str = "", cap: str = "all", tf: str = "weekly", limit: int = 10) -> dict[str, Any]:
+    """The 'Stocks to review' shortlist from the sectors already loaded on the server (no NSE calls). With a sector
+    name, that sector is loaded first if needed (about a minute) and only its stocks are returned."""
+    tf = tf if tf in sectors.TFS else "weekly"
+    cap = cap if cap in sectors.CAPS else "all"
+    limit = max(1, min(int(limit), 20))
+    catalogue = sectors.load_sectors()
+    q, names = sector.strip().lower(), {n.lower(): n for n in catalogue}
+    name = None
+    if q:
+        name = (names.get(q) or next((n for low, n in names.items() if q in low), None)
+                or next((n for n, inds in catalogue.items() if any(q in i.lower() for i in inds)), None))
+        if not name:
+            return {"error": f"Unknown sector '{sector}'.", "sectors": list(catalogue)}
+        await core._sector_data(name)
+    loaded = {n: v[1] for n, v in core._sector_cache.items() if n in catalogue}
+    r = sectors.picks(loaded, cap, tf, 40 if name else limit)
+    rows = [p for p in r["picks"] if not name or p["sector"] == name][:limit]
+    return {"cap_view": cap, "tf": tf, "sector": name, "sectors_loaded": len(loaded), "candidates": r["candidates"],
+            "rotation_warning": r["rotation_warning"],
+            "picks": [{"symbol": p["symbol"], "sector": p["sector"], "industry": p["industry"], "cap": p["cap"], "score": p["score"],
+                       "price": p["close"], "d1_pct": p["d1"], "w1_pct": p["w1"], "m1_pct": p["m1"], "vs_sector_pct": p["vs_sector"],
+                       "trend_long": p["trend_long"], "sr_long": p["sr_long"], "reasons": p["reasons"], "cautions": p["cautions"]} for p in rows],
+            "note": ("A mechanical shortlist from sector momentum, rotation and the app's rule setups on past prices; not a recommendation. "
+                     "LONG setups come from the last close, so check the current price. Only sectors already loaded are considered; "
+                     "no sectors loaded means an empty list: ask the user to open the Sectors tab and click Load sectors, or name a sector.")}
+
+
 async def sr_levels(symbol: str) -> dict[str, Any]:
     """Support/resistance zones and the rule-based support/resistance setup for one stock."""
     sym = _sym(symbol)
@@ -121,7 +204,7 @@ async def sr_levels(symbol: str) -> dict[str, Any]:
 HANDLERS = {
     "search_symbol": search_symbol, "analyze_stock": analyze_stock, "backtest_stock": backtest_stock,
     "suggest_stocks": suggest_stocks, "live_quote": live_quote, "market_movers": market_movers,
-    "sr_levels": sr_levels,
+    "sr_levels": sr_levels, "sector_momentum": sector_momentum, "sector_rotation": sector_rotation, "sector_picks": sector_picks,
 }
 
 

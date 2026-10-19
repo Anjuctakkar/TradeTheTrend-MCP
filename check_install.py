@@ -5,6 +5,8 @@ import os, sys
 here = os.path.dirname(os.path.abspath(__file__))
 checks = [
     ("sr_model.py", "def generate_sr_signal"),
+    ("sectors.py", "def map_status"),
+    (os.path.join("static", "index.html"), "view-sectors"),
     ("server.py", "import sr_model"),
     ("server.py", "signal_model"),
     ("technical.py", "def compare_signals"),
@@ -14,9 +16,15 @@ checks = [
     ("agent_tools.py", "sr_levels"),
     ("agent.py", "sr_levels"),
     (os.path.join("static", "index.html"), "S/R LONG SETUP"),
-    (os.path.join("static", "index.html"), "S/R build 2026-10-13"),
+    (os.path.join("static", "index.html"), "S/R build 2026-10-16.9"),
+    (os.path.join("static", "index.html"), "discRun"),
+    (os.path.join("static", "index.html"), "secRotation"),
+    ("agent_tools.py", "sector_rotation"),
+    ("agent_tools.py", "sector_picks"),
+    (os.path.join("static", "index.html"), "secPicks"),
     (os.path.join("static", "eval-store.js"), 'model === "sr"'),
-    (os.path.join("static", "agent-widget.js"), "Support and resistance for TCS"),
+    (os.path.join("static", "agent-widget.js"), "Which sectors are improving?"),
+    (os.path.join("static", "agent-widget.js"), "function showUsed"),
 ]
 bad = 0
 for rel, needle in checks:

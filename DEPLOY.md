@@ -308,6 +308,22 @@ Where they show up:
 
 The two rule sets are separate setups with their own entry, stop and target. Compare their outcomes on the Evaluation tab over a real sample before relying on either. Run the checks in `tests/test_sr_model.py` after any change to `sr_model.py`.
 
+## 10d. Sector momentum
+
+The **Sectors** tab follows NSE's 12 macro sectors (Commodities, Consumer Discretionary, Energy, FMCG, Financial Services, Healthcare, Industrials, Information Technology, Services, Telecommunication, Utilities, Diversified) and their industry groups (for example Financial Services: Banks, Financial Institutions, Capital Markets, Insurance). It ranks the sectors by momentum and charts each one daily, weekly or monthly; click a sector to see its industry groups, then click an industry group to chart it and list its stocks.
+
+Each sector and each industry group is an equal-weight index of a short basket (large, mid and small caps), built from adjusted prices: a proxy, not an official NSE index. The stock lists and cap tiers are approximate and should be reviewed. Each is indexed for all stocks, large caps only, and mid and small caps only. Loading all sectors fetches about 290 stocks (30 minutes or more); use **Load** to fetch one sector (4 to 56 stocks). End-of-day history is reused for 15 minutes (`SECTOR_TTL`, in seconds). On top of it the live feed's latest traded price (LTP) is added as the newest point, refreshed at most every 30 seconds (`SECTOR_LIVE_TTL`), so **1D is the LTP against the previous close** (when the market is closed, the last trade). Setups for the stocks still use end-of-day bars. The tab shows the market state, how many stocks have a current price, the history date and the age of each refresh; **Refresh live prices** can update loaded sectors every minute or 5 minutes while the tab is open. To add stocks or sectors, create a file named `sector_map.json` (underscore, not hyphen) in the app's data folder: next to `server.py` when you run locally or on Render (commit it to the repo; Render's disk is not kept between deploys), or `data/` beside `docker-compose.yml` for Docker (`DASHBOARD_DATA_DIR`). The Sectors tab shows the exact path and whether the file was found. The file is merged with the built-in lists; add `"_mode": "replace"` to use only your file. See `sector_map.example.json`: a sector maps industry groups to tiers (`large`, `mid`, `small`), and a plain list is treated as large caps. Restart the server after editing. Tick the stocks you want in a sector and send only those to Portfolio analysis.
+
+Settings > **Discover NSE tools** (admins only) lists every tool the two NSE servers offer and highlights any that mention sectors, industries, indices or constituents. Use it to check whether NSE can supply sector classification or index constituents before editing baskets by hand.
+
+## 10e. Sector rotation
+
+Under the sector ranking, the **Sector rotation** chart plots each sector's relative strength against the equal-weight of the sectors loaded (RS-Ratio across, RS-Momentum up), with a short trail showing where it came from. It is a simplified relative-rotation view, not the licensed JdK RRG formula. **Improving** (relative strength still below its norm but recovering) and sectors that just stepped from Improving into Leading are flagged as early movers. It follows the Chart (daily, weekly, monthly) and Stocks (all, large, mid and small) selectors. **Rotation view** switches to the industry groups of the selected sector. Load at least 3 sectors first. It uses data already loaded, so it makes no extra NSE calls.
+
+## 10f. Stocks to review
+
+Below the rotation chart, **Stocks to review** lists stocks from the loaded sectors that are strong or turning up: a positive 1-month return, not below their 50-day average, and either a LONG setup (trend or support/resistance rules) or a 1-month return ahead of their sector, inside a sector with a score of at least 40 or an early mover. Each gets a score out of 100 (sector 40, against its sector 30, setups 30), the reasons, and cautions (extended, mid or small cap, no live price). At most 4 per sector. Tick stocks and send only those to Portfolio analysis. It is a mechanical screen of past prices, not a recommendation. It uses sectors already loaded, so load several for a useful list.
+
 ## 11. Troubleshooting
 
 | Symptom | Likely cause and fix |

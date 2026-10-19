@@ -188,10 +188,11 @@
 <body>
 
 <div class="topbar">
-  <div class="brand">NSE MCP Dashboard<small>Bhavcopy and CM market data · S/R build 2026-10-13</small></div>
+  <div class="brand">NSE MCP Dashboard<small>Bhavcopy and CM market data · S/R build 2026-10-16.9</small></div>
   <nav class="tabs">
     <div class="tab active" data-view="analysis">Portfolio analysis</div>
     <div class="tab" data-view="eval">Evaluation</div>
+    <div class="tab" data-view="sectors">Sectors</div>
     <div class="tab" data-view="live">Live</div>
     <div class="tab" data-view="bhavcopy">Bhavcopy (EOD)</div>
     <div class="tab" data-view="cm">CM market data</div>
@@ -235,6 +236,37 @@
     <div class="main">
       <div id="trResults"><div class="empty">Loading…</div></div>
       <div id="btResults"></div>
+    </div>
+  </div>
+</section>
+
+<section class="view" id="view-sectors">
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="side-section">
+        <h2>Sector momentum</h2>
+        <div class="hint" style="margin-top:0">Each sector is an equal-weight index of its large stocks, built from adjusted prices. It is a proxy, not an official NSE sector index. Use it to see where momentum is, then analyse the stocks inside.</div>
+        <label for="secScope">Load</label>
+        <select id="secScope"><option value="all">All sectors (slow)</option></select>
+        <label for="secCap">Stocks</label>
+        <select id="secCap"><option value="all">All (large, mid and small)</option><option value="large">Large caps only</option><option value="midsmall">Mid and small caps only</option></select>
+        <label for="secTf">Chart</label>
+        <select id="secTf"><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select>
+        <label for="secPeriod">Compare sectors by</label>
+        <select id="secPeriod"><option value="d1">1 day</option><option value="w1">1 week</option><option value="m1" selected>1 month</option><option value="m3">3 months</option><option value="m6">6 months</option></select>
+        <label for="secRotLevel">Rotation view</label>
+        <select id="secRotLevel"><option value="sectors">Sectors vs all loaded sectors</option><option value="industries">Industry groups of the selected sector</option></select>
+        <label for="secEvery">Refresh live prices</label>
+        <select id="secEvery"><option value="0">Off (manual)</option><option value="60">Every minute</option><option value="300">Every 5 minutes</option></select>
+        <button class="primary" id="secLoad">Load sectors</button>
+        <div class="status" id="secStatus"></div>
+        <div class="hint" id="secMapInfo"></div>
+        <div class="hint">Sectors follow NSE's 12 macro sectors and their industry groups. Loading all sectors fetches about 290 stocks and can take 30 minutes or more; pick one sector in <b>Load</b> to fetch 4 to 56 stocks (the largest sector takes several minutes). Loaded sectors are reused for 15 minutes, and switching the Stocks view needs no reload. Edit the stock lists with a <code>sector_map.json</code> file in your data folder.</div>
+      </div>
+    </aside>
+    <div class="main">
+      <div id="secTable"><div class="empty">Click <b>Load sectors</b> to rank the sectors by momentum.</div></div>
+      <div id="secDetail"></div>
     </div>
   </div>
 </section>
@@ -336,6 +368,12 @@
       <div id="nseResult"></div>
       <div class="hint">The app waits up to 60 seconds per request and tries twice. Change this with <code>NSE_READ_TIMEOUT</code>, <code>NSE_RETRIES</code> and <code>NSE_MAX_INFLIGHT</code> in your <code>.env</code> file, then restart.</div>
     </div>
+    <div class="panel" id="discoverPanel">
+      <h2>Discover NSE tools</h2>
+      <div class="hint" style="margin-top:0">Lists every tool the two NSE servers offer. Tools whose name or description mentions sectors, industries, indices, constituents or classification are highlighted at the top, since those could supply sector lists. Administrators only.</div>
+      <div class="btnrow"><button class="primary" id="discRun">List tools on both servers</button><button class="secondary" id="discCopy" style="display:none">Copy list</button></div>
+      <div id="discOut"></div>
+    </div>
     <div class="panel" id="adminKeyHelp">
       <h2>Getting a key</h2>
       <ul class="signal-reasons" style="font-size:13px;margin:0">
@@ -407,7 +445,7 @@
   };
   _fetch("/api/auth/status").then(r => r.ok ? r.json() : null).then(d => {
     if (!d || !d.auth_enabled) return;
-    if (d.user && d.user.role !== "admin") ['adminKeyPanel', 'adminKeyHelp'].forEach(id => { const p = document.getElementById(id); if (p) p.style.display = 'none'; });
+    if (d.user && d.user.role !== "admin") ['adminKeyPanel', 'adminKeyHelp', 'discoverPanel'].forEach(id => { const p = document.getElementById(id); if (p) p.style.display = 'none'; });
     const b = document.getElementById("logoutBtn"); b.style.display = "inline-block";
     b.addEventListener("click", async () => { await _fetch("/api/logout", { method: "POST" }); location.href = "/login"; });
   }).catch(() => {});
@@ -1415,6 +1453,45 @@ document.getElementById("nseTest").addEventListener("click", async () => {
   finally { btn.disabled = false; }
 });
 
+/* ================= Settings: discover NSE tools ================= */
+const DISC_KEYS = ["sector", "industry", "index", "indices", "constituent", "classification", "macro", "basic industry"];
+const DISC_WORDS = [...DISC_KEYS, "all stocks", "allstocks", "list", "symbols", "equity"];
+/** Rows for one server's tools, likely sector/index tools first, plus a plain-text line per tool for copying. */
+function discSummarize(server, tools) {
+  const rows = tools.map(t => {
+    const text = ((t.name || "") + " " + (t.description || "")).toLowerCase();
+    return { name: t.name || "", description: (t.description || "").replace(/\s+/g, " ").trim(), params: Object.keys((t.input_schema && t.input_schema.properties) || {}),
+      hits: DISC_WORDS.filter(w => text.includes(w)), likely: DISC_KEYS.some(w => text.includes(w)) };
+  }).sort((a, b) => (b.likely - a.likely) || (b.hits.length - a.hits.length) || a.name.localeCompare(b.name));
+  return { server, rows, text: rows.map(r => `[${server}] ${r.name}(${r.params.join(", ")}): ${r.description.slice(0, 220)}`).join("\n") };
+}
+let discText = "";
+document.getElementById("discRun").addEventListener("click", async () => {
+  const btn = document.getElementById("discRun"), out = document.getElementById("discOut"), copy = document.getElementById("discCopy");
+  const names = { bhavcopy: "Bhavcopy (EOD)", cm: "CM market data" };
+  btn.disabled = true; copy.style.display = "none"; out.innerHTML = '<div class="result-msg ok">Asking both servers for their tools…</div>';
+  let html = "", all = [];
+  for (const server of ["bhavcopy", "cm"]) {
+    try {
+      const s = discSummarize(server, (await settingsCall("/api/tools?server=" + server)).tools);
+      all.push(s.text);
+      html += `<h2 style="margin:14px 0 6px">${names[server]} <span class="hint" style="margin:0">${s.rows.length} tools, ${s.rows.filter(r => r.likely).length} look related to sectors or indices</span></h2>
+        <div class="result-scroll"><table class="compact"><thead><tr><th>Tool</th><th>Inputs</th><th>Description</th></tr></thead><tbody>${
+        s.rows.map(r => `<tr${r.likely ? ' style="background:rgba(232,184,75,.12)"' : ""}><td><b>${escapeHtml(r.name)}</b>${r.likely ? ' <span class="badge expired">likely</span>' : ""}</td><td>${escapeHtml(r.params.join(", ") || "none")}</td><td style="white-space:normal;max-width:520px">${escapeHtml(r.description.slice(0, 260))}</td></tr>`).join("")}</tbody></table></div>`;
+    } catch (e) { html += `<div class="result-msg bad">${names[server]}: ${escapeHtml(e.message)}</div>`; }
+  }
+  discText = all.join("\n");
+  out.innerHTML = html;
+  if (discText) copy.style.display = "inline-block";
+  btn.disabled = false;
+});
+document.getElementById("discCopy").addEventListener("click", async () => {
+  const copy = document.getElementById("discCopy");
+  try { await navigator.clipboard.writeText(discText); copy.textContent = "Copied"; }
+  catch (e) { const ta = document.createElement("textarea"); ta.value = discText; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); copy.textContent = "Copied"; }
+  setTimeout(() => { copy.textContent = "Copy list"; }, 2000);
+});
+
 /* ================= Live prices ================= */
 const liveTab = document.querySelector('.tab[data-view="live"]');
 const liveInput = document.getElementById("liveSymbols");
@@ -1534,9 +1611,273 @@ function renderLive(d) {
   document.getElementById("liveRaw").innerHTML = statusHtml + (first ? `<details class="trades"><summary>Show the raw response for ${escapeHtml(first.symbol)}</summary><pre>${escapeHtml(JSON.stringify(first.raw, null, 2))}</pre><div class="hint">If a column above shows a dash but the raw data has the value under another name, send me this and I'll map it.</div></details>` : "");
 }
 
+/* ================= Sectors ================= */
+const secState = { rows: [], detail: {}, sel: null, charts: [], picked: new Set(), ind: null, inds: [], meta: {} };
+const SEC_LABEL = { gaining: "Gaining", losing: "Losing", mixed: "Mixed" };
+const CAP_LABEL = { large: "Large", mid: "Mid", small: "Small" };
+const secBadge = s => `<span class="badge ${s === "gaining" ? "target" : s === "losing" ? "stopped" : "expired"}">${SEC_LABEL[s] || s}</span>`;
+const secPct = v => v == null ? "—" : pct(v);
+const SEC_SMA = { daily: 20, weekly: 10, monthly: 3 }, SEC_WIN = { daily: 126, weekly: 26, monthly: 12 };
+const SEC_COLORS = ["#5b8def", "#3fb984", "#e8b84b", "#c979e0", "#ef5a5a", "#4fd1d9"];
+const secCap = () => document.getElementById("secCap").value;
+const capMatch = (s, cap) => cap === "all" || (cap === "large") === (s.cap === "large");
+
+async function secGet(url) {
+  const res = await fetch(url), d = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(typeof d.detail === "string" ? d.detail : res.statusText);
+  return d;
+}
+async function secRank() {
+  const d = await secGet("/api/sectors/summary?cap=" + secCap());
+  secState.rows = d.sectors; secState.inds = d.industries || []; secState.meta = d.meta || {}; secMapInfo(d.map_file);
+  if (!secState.rows.some(r => r.name === secState.sel)) { secState.sel = secState.rows.length ? secState.rows[0].name : null; secState.ind = null; }
+}
+function secMapInfo(m) {
+  const el = document.getElementById("secMapInfo");
+  if (!m || !el) return;
+  el.innerHTML = `Your own stocks go in <code>${escapeHtml(m.path)}</code> (merged with the built-in lists; restart the server after editing). ` +
+    (m.problem ? `<span class="warn">${escapeHtml(m.problem)}</span>` : m.exists ? `Found: ${m.entries} entr${m.entries === 1 ? "y" : "ies"}, mode ${escapeHtml(m.mode)}.` : "No file yet (optional).");
+}
+let secInited = false;
+async function secInit() {
+  if (secInited) return;
+  try {
+    const d = await secGet("/api/sectors/summary");
+    document.getElementById("secScope").innerHTML = `<option value="all">All sectors (slow)</option>` + d.names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join("");
+    secInited = true; secMapInfo(d.map_file);
+  } catch (e) {}
+}
+let secBusy = false, secTimer = null;
+async function secLoad() {
+  if (secBusy) return;
+  secBusy = true;
+  const st = document.getElementById("secStatus"), btn = document.getElementById("secLoad"), errs = [];
+  btn.disabled = true; st.className = "status";
+  try {
+    const everything = (await secGet("/api/sectors/summary")).names, scope = document.getElementById("secScope").value, names = scope === "all" ? everything : [scope];
+    for (let i = 0; i < names.length; i++) {
+      st.textContent = `Loading ${names[i]} (${i + 1} of ${names.length})…`;
+      try { secState.detail[names[i]] = await secGet("/api/sectors/one?sector=" + encodeURIComponent(names[i])); }
+      catch (e) { errs.push(`${names[i]}: ${e.message}`); }
+      await secRank(); renderSectors();
+    }
+    st.textContent = errs.length ? "Some sectors failed: " + errs.join(" | ") : "Updated " + new Date().toLocaleTimeString("en-IN");
+    st.className = errs.length ? "status error" : "status";
+  } catch (e) { st.textContent = "Couldn't load sectors: " + e.message; st.className = "status error"; }
+  finally { btn.disabled = false; secBusy = false; }
+}
+
+/** How current the numbers are: market state, price coverage, and a warning when a sector hasn't been refreshed lately. */
+function secFreshness() {
+  const ds = Object.values(secState.detail), m = Object.values(secState.meta || {});
+  if (!ds.length || !m.length) return "";
+  const priced = ds.reduce((a, d) => a + d.live.with_ltp, 0), total = ds.reduce((a, d) => a + d.live.total, 0);
+  const hist = ds.map(d => d.history_to).sort().pop(), oldest = Math.max(...m.map(x => x.age_s));
+  let html = `<div class="hint" style="margin:0 0 8px">Market: <b>${escapeHtml(m[0].market)}</b>. ${priced} of ${total} stocks have a current traded price; history to the close of ${fmtDate(hist)}. Oldest refresh ${fmtAge(oldest)}.</div>`;
+  if (oldest > 300) html += `<p class="caveat warn" style="margin:0 0 8px">Some sectors were last refreshed more than 5 minutes ago. Click Load sectors (or turn on Refresh live prices) to update them.</p>`;
+  if (total && priced < 0.8 * total) html += `<p class="caveat warn" style="margin:0 0 8px">Many stocks have no current traded price, so 1D for those is missing and the numbers lean on end-of-day closes. The live feed may be delayed or down.</p>`;
+  return html;
+}
+async function secRefreshLive() {
+  if (secBusy || !Object.keys(secState.detail).length) return;
+  secBusy = true;
+  const st = document.getElementById("secStatus");
+  try {
+    for (const n of Object.keys(secState.detail)) secState.detail[n] = await secGet("/api/sectors/one?sector=" + encodeURIComponent(n));
+    await secRank(); renderSectors();
+    st.textContent = "Live prices updated " + new Date().toLocaleTimeString("en-IN"); st.className = "status";
+  } catch (e) { st.textContent = "Couldn't refresh live prices: " + e.message; st.className = "status error"; }
+  finally { secBusy = false; }
+}
+function secSchedule() {
+  clearInterval(secTimer);
+  const every = +document.getElementById("secEvery").value;
+  if (every > 0) secTimer = setInterval(() => { if (document.getElementById("view-sectors").classList.contains("active") && !document.hidden) secRefreshLive(); }, every * 1000);
+}
+
+/* ---- Stocks to review: a shortlist from the loaded sectors, tick and send to Portfolio analysis ---- */
+let secPickToken = 0;
+const secPickSel = new Set();
+function secSendSymbols(syms, from) {
+  const list = syms.slice(0, 15);
+  stockRows.innerHTML = "";
+  list.forEach(x => { addStockRow(x); stockRows.lastElementChild.querySelector(".stockSymbol").dataset.resolved = x; });
+  updateSplitHint();
+  document.querySelector('.tab[data-view="analysis"]').click();
+  anStatus.textContent = `${list.length} stock${list.length > 1 ? "s" : ""} from ${from} added${syms.length > 15 ? " (the first 15 of " + syms.length + " selected)" : ""}. Click Run analysis.`; anStatus.className = "status";
+}
+async function secPicks() {
+  const tok = ++secPickToken, box = document.getElementById("secPicks");
+  if (!box) return;
+  let d;
+  try { d = await secGet(`/api/sectors/picks?cap=${secCap()}&tf=${document.getElementById("secTf").value}`); }
+  catch (e) { if (tok === secPickToken) box.innerHTML = `<div class="hint warn">Couldn't build the shortlist: ${escapeHtml(e.message)}</div>`; return; }
+  if (tok !== secPickToken || !document.getElementById("secPicks")) return;
+  const head = `<h2 style="margin:16px 0 6px">Stocks to review <span class="hint" style="margin:0">from the ${d.sectors_loaded} sector${d.sectors_loaded === 1 ? "" : "s"} loaded</span></h2>
+    <div class="hint" style="margin:0 0 8px">A mechanical shortlist: stocks with a positive month that are not below their 50-day average, in sectors that are strong or turning up, and that either have a LONG setup or are ahead of their sector. Score out of 100 = sector strength (40) + strength against the sector (30) + setups (30). Not a recommendation or investment advice: review each stock, its price and its costs yourself. ${d.rotation_warning ? `<span class="warn">Rotation not used: ${escapeHtml(d.rotation_warning)}</span>` : ""}</div>`;
+  if (!d.picks.length) { box.innerHTML = head + `<div class="hint">No stocks meet the rules right now (${d.candidates} candidates). Load more sectors, or try another Stocks view.</div>`; return; }
+  box.innerHTML = head + `<div class="panel" style="padding:8px 10px"><div class="result-scroll"><table class="compact"><thead><tr><th><input type="checkbox" id="secPickAll" aria-label="Select all shown"></th><th>Stock</th><th>Sector</th><th>Cap</th><th class="r">Score</th><th class="r">Price</th><th class="r">1D</th><th class="r">1W</th><th class="r">1M</th><th class="r">vs sector</th><th>Setups</th><th>Why</th></tr></thead><tbody>${
+    d.picks.map(p => `<tr><td><input type="checkbox" class="secPickBox" data-s="${escapeHtml(p.symbol)}" ${secPickSel.has(p.symbol) ? "checked" : ""} aria-label="Select ${escapeHtml(p.symbol)}"></td>
+      <td><b>${escapeHtml(p.symbol)}</b></td><td>${escapeHtml(p.sector)}<div class="hint" style="margin:0">${escapeHtml(p.industry)}</div></td><td>${CAP_LABEL[p.cap] || ""}</td><td class="r"><b>${p.score}</b></td><td class="r">${rupee(p.close, 2)}</td>
+      <td class="r">${secPct(p.d1)}</td><td class="r">${secPct(p.w1)}</td><td class="r">${secPct(p.m1)}</td><td class="r">${p.vs_sector == null ? "—" : secPct(p.vs_sector)}</td>
+      <td>${p.trend_long ? "<span class='badge target'>Trend</span> " : ""}${p.sr_long ? "<span class='badge open'>S/R</span>" : ""}${!p.trend_long && !p.sr_long ? "<span style='color:var(--muted)'>none</span>" : ""}</td>
+      <td style="white-space:normal;min-width:260px;font-size:12px">${p.reasons.map(escapeHtml).join("; ")}${p.cautions.length ? `<div class="warn">${p.cautions.map(escapeHtml).join("; ")}</div>` : ""}</td></tr>`).join("")}</tbody></table></div>
+    <button class="primary" id="secPickSend" style="width:auto;padding:9px 16px" disabled>Select stocks to send to Portfolio analysis</button>
+    <div class="hint">Sends only the ticked stocks (up to 15) to the Portfolio analysis list, where you can run the full analysis, funding and backtest. LONG setups come from the last close: check the current price there.</div></div>`;
+  const btn = document.getElementById("secPickSend"), all = document.getElementById("secPickAll"), shown = d.picks.map(p => p.symbol);
+  const refresh = () => { const n = shown.filter(x => secPickSel.has(x)).length; btn.disabled = n === 0;
+    btn.textContent = n ? `Send ${Math.min(n, 15)} selected to Portfolio analysis` : "Select stocks to send to Portfolio analysis"; all.checked = n === shown.length; };
+  box.querySelectorAll(".secPickBox").forEach(b => b.addEventListener("change", () => { b.checked ? secPickSel.add(b.dataset.s) : secPickSel.delete(b.dataset.s); refresh(); }));
+  all.addEventListener("change", () => { shown.forEach(x => all.checked ? secPickSel.add(x) : secPickSel.delete(x)); box.querySelectorAll(".secPickBox").forEach(b => { b.checked = all.checked; }); refresh(); });
+  btn.addEventListener("click", () => secSendSymbols(shown.filter(x => secPickSel.has(x)), "sector picks"));
+  refresh();
+}
+
+/* ---- Sector rotation: RS-Ratio (across) against RS-Momentum (up), with trails ---- */
+let secRotToken = 0;
+const ROT_Q = { leading: ["Leading", "rgba(63,185,132,.10)", "target"], improving: ["Improving", "rgba(91,141,239,.10)", "open"], weakening: ["Weakening", "rgba(232,184,75,.10)", "expired"], lagging: ["Lagging", "rgba(239,90,90,.10)", "stopped"] };
+const secRotPlugin = { id: "secRotPlugin",
+  beforeDraw(chart) {
+    const { ctx, chartArea: a, scales: { x, y } } = chart, cx = Math.min(Math.max(x.getPixelForValue(100), a.left), a.right), cy = Math.min(Math.max(y.getPixelForValue(100), a.top), a.bottom);
+    ctx.save();
+    [["improving", a.left, a.top, cx - a.left, cy - a.top], ["leading", cx, a.top, a.right - cx, cy - a.top], ["lagging", a.left, cy, cx - a.left, a.bottom - cy], ["weakening", cx, cy, a.right - cx, a.bottom - cy]]
+      .forEach(([q, px, py, w, hh]) => { ctx.fillStyle = ROT_Q[q][1]; ctx.fillRect(px, py, w, hh); ctx.fillStyle = "#8596a6"; ctx.font = "12px sans-serif";
+        ctx.fillText(ROT_Q[q][0], q === "leading" || q === "weakening" ? px + w - 64 : px + 8, q === "leading" || q === "improving" ? py + 16 : py + hh - 8); });
+    ctx.restore();
+  },
+  afterDatasetsDraw(chart) {
+    const { ctx } = chart; ctx.save(); ctx.font = "12px sans-serif";
+    chart.data.datasets.forEach((ds, i) => { const pt = chart.getDatasetMeta(i).data[ds.data.length - 1]; if (!pt) return; ctx.fillStyle = ds.borderColor; ctx.fillText(ds.label, pt.x + 8, pt.y - 6); });
+    ctx.restore();
+  } };
+async function secRotation() {
+  const tok = ++secRotToken, info = document.getElementById("secRotInfo"), tbl = document.getElementById("secRotTable");
+  if (!info) return;
+  const q = new URLSearchParams({ tf: document.getElementById("secTf").value, cap: secCap(), level: document.getElementById("secRotLevel").value, sector: secState.sel || "" });
+  let d;
+  try { d = await secGet("/api/sectors/rotation?" + q); } catch (e) { if (tok === secRotToken) info.textContent = "Couldn't load rotation: " + e.message; return; }
+  if (tok !== secRotToken || !document.getElementById("secRot")) return;
+  if (d.warning || !d.items.length) { info.innerHTML = `<span class="warn">${escapeHtml(d.warning || "No rotation data yet.")}</span>`; tbl.innerHTML = ""; return; }
+  const early = d.items.filter(x => x.early).map(x => x.name);
+  info.innerHTML = `Against ${escapeHtml(d.benchmark)}. RS-Ratio above 100 means stronger than its own recent norm; RS-Momentum above 100 means that relative strength is improving. A trail of ${d.params.trail} points (${d.params.step} ${d.tf === "daily" ? "days" : d.tf === "weekly" ? "weeks" : "months"} apart) ends at the big dot. <b>Early movers:</b> ${early.length ? early.map(escapeHtml).join(", ") : "none right now"}. A simplified relative-rotation view of past prices, not the licensed RRG formula; rotations often fail, so confirm with the stocks themselves. The newest point includes live prices and is partial until the period ends. Not investment advice.`;
+  const dev = k => Math.max(2, 1.2 * Math.max(...d.items.flatMap(it => it.trail.map(t => Math.abs(t[k] - 100)))));
+  const dx = dev("ratio"), dy = dev("mom");
+  secState.charts.push(new Chart(document.getElementById("secRot"), { type: "scatter", plugins: [secRotPlugin],
+    data: { datasets: d.items.map((it, i) => ({ label: it.name, data: it.trail.map(t => ({ x: t.ratio, y: t.mom })), showLine: true, borderColor: SEC_COLORS[i % SEC_COLORS.length],
+      backgroundColor: SEC_COLORS[i % SEC_COLORS.length], borderWidth: it.early ? 2.4 : 1.2, tension: 0.2, pointRadius: it.trail.map((_, j) => j === it.trail.length - 1 ? 6 : 2.5) })) },
+    options: { responsive: true, maintainAspectRatio: false, layout: { padding: { right: 70 } },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ratio ${c.parsed.x}, momentum ${c.parsed.y}` } } },
+      scales: { x: { min: 100 - dx, max: 100 + dx, title: { display: true, text: "RS-Ratio (relative strength vs benchmark)", color: "#8596a6" }, ticks: { color: "#8596a6" }, grid: { color: "#233242" } },
+        y: { min: 100 - dy, max: 100 + dy, title: { display: true, text: "RS-Momentum", color: "#8596a6" }, ticks: { color: "#8596a6" }, grid: { color: "#233242" } } } } }));
+  tbl.innerHTML = `<div class="result-scroll" style="margin-top:10px"><table class="compact"><thead><tr><th>${d.level === "industries" ? "Industry group" : "Sector"}</th><th>Quadrant</th><th class="r">RS-Ratio</th><th class="r">RS-Momentum</th><th>Signal</th></tr></thead><tbody>${
+    d.items.map(it => `<tr${d.level === "sectors" ? ` class="secRotRow" data-n="${escapeHtml(it.name)}" style="cursor:pointer;${it.early ? "background:rgba(91,141,239,.12)" : ""}"` : it.early ? ' style="background:rgba(91,141,239,.12)"' : ""}><td><b>${escapeHtml(it.name)}</b>${it.early ? ' <span class="badge open">early</span>' : ""}</td><td><span class="badge ${ROT_Q[it.quadrant][2]}">${ROT_Q[it.quadrant][0]}</span></td><td class="r">${it.ratio}</td><td class="r">${it.mom}</td><td>${escapeHtml(it.signal)}</td></tr>`).join("")}</tbody></table></div>`;
+  tbl.querySelectorAll(".secRotRow").forEach(tr => tr.addEventListener("click", () => { secState.sel = tr.dataset.n; secState.ind = null; renderSectors(); }));
+}
+
+/** The top sectors (plus the selected one) as lines, each rebased to 100 at the start of the window shown. */
+function secCompare(names, tf, cap) {
+  const cols = names.map(n => {
+    const seg = secState.detail[n] && secState.detail[n].segments[cap]; if (!seg) return null;
+    const s = seg.series[tf], k = Math.min(SEC_WIN[tf], s.dates.length), dates = s.dates.slice(-k), vals = s.values.slice(-k);
+    return { n, map: Object.fromEntries(dates.map((d, i) => [d, vals[i] / vals[0] * 100])) };
+  }).filter(Boolean);
+  const labels = [...new Set(cols.flatMap(c => Object.keys(c.map)))].sort();
+  return { labels, sets: cols.map((c, i) => ({ label: c.n, data: labels.map(l => c.map[l] ?? null), borderColor: SEC_COLORS[i % SEC_COLORS.length],
+    pointRadius: 0, borderWidth: c.n === secState.sel ? 2.6 : 1.4, tension: 0.1, spanGaps: true })) };
+}
+const secAxes = () => ({ x: { ticks: { color: "#8596a6", maxTicksLimit: 8 }, grid: { color: "#233242" } }, y: { ticks: { color: "#8596a6" }, grid: { color: "#233242" } } });
+
+function renderSectors() {
+  secState.charts.forEach(c => c.destroy()); secState.charts.length = 0;
+  const rows = secState.rows, period = document.getElementById("secPeriod").value, tf = document.getElementById("secTf").value, cap = secCap();
+  const PL = { d1: "1 day", w1: "1 week", m1: "1 month", m3: "3 months", m6: "6 months" };
+  const CL = { all: "all stocks", large: "large caps", midsmall: "mid and small caps" };
+  if (!rows.length) { document.getElementById("secTable").innerHTML = `<div class="empty">No sectors have ${CL[cap]} loaded yet.</div>`; document.getElementById("secDetail").innerHTML = ""; return; }
+  document.getElementById("secTable").innerHTML = `<h2 style="margin-bottom:8px">Sectors by momentum <span class="hint" style="margin:0">(${CL[cap]})</span></h2>
+    ${secFreshness()}
+    <div class="panel" style="padding:8px 10px"><div class="result-scroll"><table class="compact"><thead><tr><th>Sector</th><th>Status</th><th class="r">Score</th><th class="r" title="Latest traded price against the previous close">1D (LTP)</th><th class="r">1W</th><th class="r">1M</th><th class="r">3M</th><th class="r">6M</th><th class="r" title="Share of the sector's stocks above their own 50-day average">Above 50-day</th><th class="r">Stocks</th></tr></thead><tbody>${
+      rows.map(r => `<tr class="secRow" data-n="${escapeHtml(r.name)}" style="cursor:pointer${r.name === secState.sel ? ";background:rgba(91,141,239,.12)" : ""}"><td><b>${escapeHtml(r.name)}</b></td><td>${secBadge(r.status)}</td><td class="r">${r.score}</td><td class="r">${secPct(r.d1)}</td><td class="r">${secPct(r.w1)}</td><td class="r">${secPct(r.m1)}</td><td class="r">${secPct(r.m3)}</td><td class="r">${secPct(r.m6)}</td><td class="r">${r.breadth50 == null ? "—" : r.breadth50 + "%"}</td><td class="r">${r.used}/${r.total}</td></tr>`).join("")}</tbody></table></div>
+    <div class="chart-wrap small" style="margin-top:12px"><canvas id="secBars"></canvas></div>
+    <h2 style="margin:14px 0 6px">Top 5 sectors and the one selected, rebased to 100 <span class="hint" style="margin:0">(${tf}, last ${SEC_WIN[tf]} ${tf === "daily" ? "days" : tf === "weekly" ? "weeks" : "months"})</span></h2>
+    <div class="chart-wrap mid"><canvas id="secCmp"></canvas></div>
+    <h2 style="margin:16px 0 6px">Sector rotation <span class="hint" style="margin:0">(${tf}, ${CL[cap]})</span></h2>
+    <div id="secRotInfo" class="hint" style="margin:0 0 8px">Loading rotation…</div>
+    <div class="chart-wrap" style="height:440px"><canvas id="secRot"></canvas></div>
+    <div id="secRotTable"></div>
+    <div id="secPicks"></div>
+    <div class="hint">1D is the latest traded price (LTP) against the previous close; when the market is closed it is the last trade. Weekly and monthly bars are partial until the period ends. Score ranks the sectors against each other: 40% 1-month return, 30% 3-month, 20% 1-week, 10% breadth. Gaining = 1M and 1W positive, index above its 20-day average, at least half the stocks above their 50-day average. Losing = 1M negative and below the 20-day average. Comparing the <b>Stocks</b> views shows whether strength is broad or only in large caps. A mechanical read of past prices, not a forecast or advice. Click a sector for its chart and stocks.</div></div>`;
+  const sorted = rows.filter(r => r[period] != null).sort((a, b) => b[period] - a[period]);
+  secState.charts.push(new Chart(document.getElementById("secBars"), { type: "bar",
+    data: { labels: sorted.map(r => r.name), datasets: [{ label: "Return over " + PL[period] + " (%)", data: sorted.map(r => r[period]), backgroundColor: sorted.map(r => r[period] >= 0 ? "#3fb984" : "#ef5a5a") }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: "#e4ebf2", boxWidth: 12 } } }, scales: secAxes() } }));
+  const top = rows.slice(0, 5).map(r => r.name); if (secState.sel && !top.includes(secState.sel)) top.push(secState.sel);
+  const cmp = secCompare(top, tf, cap);
+  secState.charts.push(new Chart(document.getElementById("secCmp"), { type: "line", data: { labels: cmp.labels, datasets: cmp.sets },
+    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false }, plugins: { legend: { labels: { color: "#e4ebf2", boxWidth: 12 } } }, scales: secAxes() } }));
+  secRotation(); secPicks();
+  document.querySelectorAll(".secRow").forEach(tr => tr.addEventListener("click", () => { secState.sel = tr.dataset.n; secState.ind = null; renderSectors(); }));
+
+  const d = secState.detail[secState.sel], out = document.getElementById("secDetail");
+  if (!d || !d.segments[cap]) { out.innerHTML = ""; return; }
+  const ind = secState.ind, g = ind && d.industries && d.industries[ind] && d.industries[ind].segments[cap] ? d.industries[ind] : null;
+  const ser = (g || d).segments[cap].series[tf], n = SEC_SMA[tf], stocks = d.stocks.filter(s => capMatch(s, cap) && (!g || s.industry === ind));
+  const indRows = secState.inds.filter(r => r.sector === d.sector);
+  const indHtml = indRows.length ? `<h2 style="margin:12px 0 6px">Industry groups in ${escapeHtml(d.sector)} <span class="hint" style="margin:0">(click one to chart it and list its stocks; scores rank against every industry group loaded)</span> ${g ? '<button type="button" class="chipbtn" id="secWhole">Show whole sector</button>' : ""}</h2>
+    <div class="result-scroll"><table class="compact"><thead><tr><th>Industry group</th><th>Status</th><th class="r">Score</th><th class="r">1W</th><th class="r">1M</th><th class="r">3M</th><th class="r">Above 50-day</th><th class="r">Stocks</th></tr></thead><tbody>${
+      indRows.map(r => `<tr class="secInd" data-i="${escapeHtml(r.industry)}" style="cursor:pointer${r.industry === ind ? ";background:rgba(91,141,239,.12)" : ""}"><td><b>${escapeHtml(r.industry)}</b></td><td>${secBadge(r.status)}</td><td class="r">${r.score}</td><td class="r">${secPct(r.w1)}</td><td class="r">${secPct(r.m1)}</td><td class="r">${secPct(r.m3)}</td><td class="r">${r.breadth50 == null ? "—" : r.breadth50 + "%"}</td><td class="r">${r.used}/${r.total}</td></tr>`).join("")}</tbody></table></div>` : "";
+  const avg = ser.values.map((_, i) => i + 1 < n ? null : ser.values.slice(i + 1 - n, i + 1).reduce((a, b) => a + b, 0) / n);
+  out.innerHTML = `<div class="stock-card"><h3>${escapeHtml(d.sector)}${g ? " › " + escapeHtml(ind) : ""} <span class="hint" style="margin:0">${tf} chart, equal-weight index of ${CL[cap]} (base 100), as of ${fmtDate(d.as_of)}</span></h3>
+    ${indHtml}
+    <div class="chart-wrap" style="margin-top:12px"><canvas id="secLine"></canvas></div>
+    <div class="hint" style="margin-top:6px">Prices: ${d.live.with_ltp} of ${d.live.total} stocks have a current traded price (${d.live.live} live, ${d.live.last_trade} last trade); history to the close of ${fmtDate(d.history_to)}; fetched ${escapeHtml(d.fetched_at)} IST. The newest point on every chart includes the traded price.</div>
+    ${Object.keys(d.errors || {}).length ? `<div class="hint warn">Not included: ${Object.entries(d.errors).map(([k, v]) => escapeHtml(k + " (" + v + ")")).join(", ")}</div>` : ""}
+    <div class="result-scroll" style="margin-top:10px"><table class="compact"><thead><tr><th><input type="checkbox" id="secAll" aria-label="Select all shown"></th><th>Stock</th><th>Cap</th><th>Industry</th><th class="r">Price</th><th class="r" title="Latest traded price against the previous close">1D (LTP)</th><th class="r">1W</th><th class="r">1M</th><th>Above 50-day</th><th>Trend setup</th><th>S/R setup</th></tr></thead><tbody>${
+      stocks.map(s => `<tr><td><input type="checkbox" class="secPick" data-s="${escapeHtml(s.symbol)}" ${secState.picked.has(s.symbol) ? "checked" : ""} aria-label="Select ${escapeHtml(s.symbol)}"></td><td><b>${escapeHtml(s.symbol)}</b></td><td>${CAP_LABEL[s.cap] || ""}</td><td>${escapeHtml(s.industry || "")}</td><td class="r">${rupee(s.close, 2)} <span class="badge ${s.ltp_source === "live" ? "target" : s.ltp_source ? "" : "expired"}" title="${s.ltp_source ? "Latest traded price" : "No current price: end-of-day close"}">${s.ltp_source === "live" ? "live" : s.ltp_source === "last_trade" ? "last trade" : "EOD"}</span></td><td class="r">${secPct(s.d1)}</td><td class="r">${secPct(s.w1)}</td><td class="r">${secPct(s.m1)}</td><td>${s.above_sma50 == null ? "—" : s.above_sma50 ? "Yes" : "No"}</td><td>${s.trend_long ? "<b style='color:var(--accent)'>LONG</b>" : "<span style='color:var(--muted)'>No trade</span>"}</td><td>${s.sr_long ? "<b style='color:var(--accent)'>LONG</b> " + escapeHtml(SETUP_LABEL[s.sr_setup] || "") : "<span style='color:var(--muted)'>No trade</span>"}</td></tr>`).join("")}</tbody></table></div>
+    <button class="primary" id="secSend" style="width:auto;padding:9px 16px" disabled>Select stocks to send to Portfolio analysis</button>
+    <div class="hint">Tick the stocks you want, then send only those (up to 15) to Portfolio analysis so you can run the full analysis, funding and backtest. Small and mid caps can be thinly traded and move more: check volumes and costs. Information only, not investment advice.</div></div>`;
+  secState.charts.push(new Chart(document.getElementById("secLine"), { type: "line",
+    data: { labels: ser.dates, datasets: [
+      { label: "Sector index", data: ser.values, borderColor: "#5b8def", pointRadius: 0, borderWidth: 1.8, tension: 0.1 },
+      { label: n + "-" + (tf === "daily" ? "day" : tf === "weekly" ? "week" : "month") + " average", data: avg, borderColor: "#e8b84b", pointRadius: 0, borderWidth: 1.3, tension: 0.1 }] },
+    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false }, plugins: { legend: { labels: { color: "#e4ebf2", boxWidth: 12 } } }, scales: secAxes() } }));
+  out.querySelectorAll(".secInd").forEach(tr => tr.addEventListener("click", () => { secState.ind = tr.dataset.i; renderSectors(); }));
+  const whole = document.getElementById("secWhole"); if (whole) whole.addEventListener("click", () => { secState.ind = null; renderSectors(); });
+  const sendBtn = document.getElementById("secSend"), allBox = document.getElementById("secAll");
+  const chosen = () => stocks.filter(x => secState.picked.has(x.symbol));
+  const refreshSend = () => {
+    const n = chosen().length;
+    sendBtn.disabled = n === 0;
+    sendBtn.textContent = n ? `Send ${Math.min(n, 15)} selected to Portfolio analysis` : "Select stocks to send to Portfolio analysis";
+    allBox.checked = stocks.length > 0 && n === stocks.length;
+  };
+  out.querySelectorAll(".secPick").forEach(b => b.addEventListener("change", () => { b.checked ? secState.picked.add(b.dataset.s) : secState.picked.delete(b.dataset.s); refreshSend(); }));
+  allBox.addEventListener("change", () => {
+    stocks.forEach(x => allBox.checked ? secState.picked.add(x.symbol) : secState.picked.delete(x.symbol));
+    out.querySelectorAll(".secPick").forEach(b => { b.checked = allBox.checked; });
+    refreshSend();
+  });
+  refreshSend();
+  sendBtn.addEventListener("click", () => {
+    const all = chosen(), pick = all.slice(0, 15);
+    if (!pick.length) return;
+    stockRows.innerHTML = "";
+    pick.forEach(x => { addStockRow(x.symbol); stockRows.lastElementChild.querySelector(".stockSymbol").dataset.resolved = x.symbol; });
+    updateSplitHint();
+    document.querySelector('.tab[data-view="analysis"]').click();
+    anStatus.textContent = `${pick.length} selected stock${pick.length > 1 ? "s" : ""} from ${d.sector} added${all.length > 15 ? " (the first 15 of " + all.length + " selected)" : ""}. Click Run analysis.`;
+    anStatus.className = "status";
+  });
+}
+document.getElementById("secLoad").addEventListener("click", secLoad);
+document.querySelector('.tab[data-view="sectors"]').addEventListener("click", secInit);
+["secTf", "secPeriod"].forEach(id => document.getElementById(id).addEventListener("change", renderSectors));
+document.getElementById("secEvery").addEventListener("change", secSchedule);
+document.getElementById("secRotLevel").addEventListener("change", secRotation);
+document.getElementById("secCap").addEventListener("change", async () => { try { await secRank(); } catch (e) {} renderSectors(); });
+
 renderRecommendPanel();
 </script>
 
-<script src="/agent-widget.js?v=sr20261013" data-title="Market assistant" data-accent="#5b8def" data-settings="true" defer></script>
+<script src="/agent-widget.js?v=sr20261016" data-title="Market assistant" data-accent="#5b8def" data-settings="true" defer></script>
 </body>
 </html>

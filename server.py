@@ -46,6 +46,7 @@ import funding
 import holding
 import nse_cache
 import recommend
+import sectors
 import sr_model
 import technical
 
@@ -64,7 +65,7 @@ def health():
     except Exception as exc:  # noqa: BLE001
         print(f"[health] database check failed: {type(exc).__name__}: {exc}", flush=True)
         raise HTTPException(503, "database unavailable")
-    return {"ok": True, "build": "sr-2026-10-13"}
+    return {"ok": True, "build": "sr-2026-10-16.9"}
 
 SERVERS: dict[str, str] = {
     "bhavcopy": os.getenv("NSE_BHAV_URL", "https://mcp.nseindia.in/bhavcopy/cm/mcp"),
@@ -1048,6 +1049,105 @@ async def run_backtest(req: BacktestRequest):
     ok = [r for r in results if "error" not in r]
     return {"params": {"months": months, "max_hold": max_hold, "cost_pct": cost, "strategy": req.strategy},
             "results": results, "pooled": backtest.pool(ok) if ok else None}
+
+
+# ---------------------------------------------------------------------------
+# Sector momentum (see sectors.py): equal-weight sector indices from each sector's large stocks
+# ---------------------------------------------------------------------------
+SECTOR_TTL = float(os.getenv("SECTOR_TTL", "900"))      # seconds a built sector is reused
+SECTOR_LIVE_TTL = float(os.getenv("SECTOR_LIVE_TTL", "30"))   # seconds the live-price overlay is reused
+_sector_cache: dict[str, tuple[float, dict[str, Any]]] = {}      # finished result with live prices
+_sector_base: dict[str, tuple[float, dict[str, list[dict[str, Any]]], dict[str, str]]] = {}   # end-of-day history
+_sector_locks: dict[str, asyncio.Lock] = {}
+
+
+async def _sector_data(name: str) -> dict[str, Any]:
+    """History (end of day) is reused for SECTOR_TTL; the live-price overlay is refreshed whenever the result is older than SECTOR_LIVE_TTL."""
+    catalogue = sectors.load_sectors()
+    if name not in catalogue:
+        raise HTTPException(404, "Unknown sector.")
+    async with _sector_locks.setdefault(name, asyncio.Lock()):        # one build per sector at a time
+        hit = _sector_cache.get(name)
+        if hit and time.time() - hit[0] < SECTOR_LIVE_TTL:
+            return hit[1]
+        base = _sector_base.get(name)
+        if base is None or time.time() - base[0] >= SECTOR_TTL:
+            url = _server_url(ANALYSIS_SERVER)
+            sem = asyncio.Semaphore(ANALYSIS_CONCURRENCY)
+            records: dict[str, list[dict[str, Any]]] = {}
+            errors: dict[str, str] = {}
+
+            async def one(sym: str) -> None:
+                async with sem:
+                    try:
+                        recs = await _fetch_history_adjusted(url, sym, 12, partial_ok=True)
+                        if recs:
+                            records[sym] = recs
+                        else:
+                            errors[sym] = "no price history"
+                    except Exception as exc:  # noqa: BLE001
+                        errors[sym] = _describe_error(exc)[:120]
+
+            async with heavy_slot():
+                await asyncio.gather(*(one(s) for s in sectors.all_symbols(catalogue[name])))
+            base = _sector_base[name] = (time.time(), records, errors)
+        _, records, errors = base
+        live: dict[str, dict[str, Any]] = {}
+        psem = asyncio.Semaphore(6)
+
+        async def price(sym: str) -> None:
+            last = records[sym][-1]
+            async with psem:
+                live[sym] = await get_cmp(sym, _to_float(last.get("close")), str(last.get("date", ""))[:10] or None)
+
+        await asyncio.gather(*(price(s) for s in records))             # get_cmp never raises; shared 30-second cache
+        data = sectors.assemble(name, catalogue[name], records, dict(errors), live)
+        data["market"] = _market_status()["state"]
+        data["fetched_at"] = dt.datetime.now(IST).strftime("%d %b %H:%M:%S")
+        _sector_cache[name] = (time.time(), data)
+        return data
+
+
+@app.get("/api/sectors/one")
+async def sectors_one(sector: str):
+    """One sector: its index (daily, weekly, monthly), momentum numbers and constituent stocks."""
+    try:
+        return await _sector_data(sector.strip())
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, f"Sector data failed: {_describe_error(exc)}")
+
+
+@app.get("/api/sectors/summary")
+async def sectors_summary(cap: str = "all"):
+    """Ranking of the sectors loaded so far (no NSE calls). cap: all, large or midsmall. The page loads sectors one by one, then asks for this."""
+    if cap not in sectors.CAPS:
+        raise HTTPException(400, f"cap must be one of {list(sectors.CAPS)}.")
+    catalogue = sectors.load_sectors()
+    loaded = {n: v[1] for n, v in _sector_cache.items() if n in catalogue}
+    return {"names": list(catalogue), "sectors": sectors.rank(loaded, cap), "industries": sectors.rank_industries(loaded, cap),
+            "map_file": sectors.map_status(),
+            "meta": {n: {"fetched_at": v[1]["fetched_at"], "age_s": int(time.time() - v[0]), "market": v[1]["market"]}
+                     for n, v in _sector_cache.items() if n in catalogue}}
+
+
+@app.get("/api/sectors/rotation")
+async def sectors_rotation(tf: str = "weekly", cap: str = "all", level: str = "sectors", sector: str = ""):
+    """Sector rotation points from the sectors already loaded (no NSE calls). level: sectors, or industries (of `sector`)."""
+    if tf not in sectors.TFS or cap not in sectors.CAPS or level not in ("sectors", "industries"):
+        raise HTTPException(400, "Bad tf, cap or level.")
+    catalogue = sectors.load_sectors()
+    return sectors.rotation({n: v[1] for n, v in _sector_cache.items() if n in catalogue}, tf, cap, level, sector.strip())
+
+
+@app.get("/api/sectors/picks")
+async def sectors_picks(cap: str = "all", tf: str = "weekly", limit: int = 15):
+    """A mechanical shortlist of stocks to review, from the sectors already loaded (no NSE calls)."""
+    if tf not in sectors.TFS or cap not in sectors.CAPS:
+        raise HTTPException(400, "Bad tf or cap.")
+    catalogue = sectors.load_sectors()
+    return sectors.picks({n: v[1] for n, v in _sector_cache.items() if n in catalogue}, cap, tf, max(1, min(limit, 40)))
 
 
 MAX_EVAL_ENTRIES = 300

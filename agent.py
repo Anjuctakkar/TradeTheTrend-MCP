@@ -17,6 +17,9 @@ What you can do, using your tools:
 - show a mechanical, rule-based long setup (entry, stop, target) or "no trade", with the 52-week high and low and a proposed holding period
 - backtest that rule set on a stock's past prices, or backtest the separate support/resistance rule set (strategy "sr")
 - show a stock's support and resistance zones and the rule-based support-bounce or resistance-breakout long setup (sr_levels)
+- rank the NSE macro sectors (Commodities, Consumer Discretionary, Energy, FMCG, Financial Services, Healthcare, Industrials, Information Technology, Services, Telecommunication, Utilities, Diversified) and their industry groups by momentum, or read one sector, across large, mid and small caps (sector_momentum). These are equal-weight proxy indices built from a basket of stocks, not official NSE sector indices; say so
+- show sector rotation: which sectors are Leading, Improving, Weakening or Lagging against the others and which are early movers (sector_rotation). Say it is a simplified relative-rotation view of past prices, not the licensed RRG, and that rotations often fail
+- list stocks worth reviewing from the strong or turning-up sectors, with reasons and cautions (sector_picks). Present them as a mechanical shortlist of past prices to review, never as recommendations or advice; mention the cautions and that LONG setups come from the last close
 - scan the most-traded stocks for setups that don't overlap with stocks the user holds
 - show live quotes and today's top gainers and losers
 - when you have a my_watchlist tool, show the stocks on the user's own evaluation list, which is kept on their computer and shared by their browser (entry, stop, target, when added). It has no outcomes; those are on the Evaluation tab
@@ -59,6 +62,21 @@ TOOLS: list[dict[str, Any]] = [
         "name": "sr_levels",
         "description": "Support and resistance zones (price, touches, ATR) for one NSE symbol and the rule-based support/resistance long setup: LONG (support_bounce or resistance_breakout, with entry/stop/target) or NO_TRADE with reasons. Also returns the current market price and, for a LONG, whether the setup still holds at that price.",
         "input_schema": {"type": "object", "properties": {"symbol": {"type": "string", "description": "NSE ticker, e.g. TCS"}}, "required": ["symbol"]},
+    },
+    {
+        "name": "sector_momentum",
+        "description": "Sector momentum from equal-weight proxy indices (not official NSE indices). With a sector name (NSE macro sectors: Commodities, Consumer Discretionary, Energy, FMCG, Financial Services, Healthcare, Industrials, Information Technology, Services, Telecommunication, Utilities, Diversified; an industry group name such as Banks or Automobiles also works) and its industry groups: its 1D/1W/1M/3M/6M returns, share of stocks above their 50-day average, a gaining/losing/mixed status and its stocks (slow the first time, about a minute). With no sector: a ranking of the sectors already loaded. cap = all, large or midsmall.",
+        "input_schema": {"type": "object", "properties": {"sector": {"type": "string"}, "cap": {"type": "string", "enum": ["all", "large", "midsmall"]}}, "required": []},
+    },
+    {
+        "name": "sector_rotation",
+        "description": "Sector rotation: each sector's relative strength against the equal-weight of the loaded sectors (RS-Ratio and RS-Momentum), its quadrant (leading, improving, weakening, lagging), the previous quadrant, a signal, and the early movers (improving with relative strength rising, or just moved into leading). level 'sectors' uses sectors already loaded on the server (needs at least 3); level 'industries' with a sector name shows that sector's industry groups and loads it if needed (slow the first time). tf = daily, weekly or monthly; cap = all, large or midsmall.",
+        "input_schema": {"type": "object", "properties": {"sector": {"type": "string"}, "tf": {"type": "string", "enum": ["daily", "weekly", "monthly"]}, "cap": {"type": "string", "enum": ["all", "large", "midsmall"]}, "level": {"type": "string", "enum": ["sectors", "industries"]}}, "required": []},
+    },
+    {
+        "name": "sector_picks",
+        "description": "A mechanical shortlist of stocks to review from the sectors already loaded on the server: positive 1-month return, not below the 50-day average, in a strong or early-mover sector, and either a LONG setup (trend or support/resistance) or ahead of its sector. Returns a score out of 100, the reasons and cautions for each. With a sector name (or industry group name) that sector is loaded first if needed (slow the first time) and only its stocks are returned. cap = all, large or midsmall; tf = daily, weekly or monthly (used for the rotation part); limit up to 20.",
+        "input_schema": {"type": "object", "properties": {"sector": {"type": "string"}, "cap": {"type": "string", "enum": ["all", "large", "midsmall"]}, "tf": {"type": "string", "enum": ["daily", "weekly", "monthly"]}, "limit": {"type": "integer"}}, "required": []},
     },
     {
         "name": "suggest_stocks",

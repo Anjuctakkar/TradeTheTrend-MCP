@@ -38,6 +38,7 @@
     ".chip{background:#fff;border:1px solid #cfd8e3;border-radius:999px;padding:5px 11px;font-size:13px;cursor:pointer;color:#16202a}" +
     ".chip:hover{border-color:" + ACCENT + "}" +
     ".typing{font-size:13px;color:#5b6b7b;align-self:flex-start}" +
+    ".used{margin-top:7px;font-size:11px;color:#5b6b7b;white-space:normal}" +
     ".form{display:flex;gap:8px;padding:10px;border-top:1px solid #dfe5ec;background:#fff}" +
     ".form input{flex:1;border:1px solid #cfd8e3;border-radius:8px;padding:9px 10px;font-size:14px;outline:none}" +
     ".form input:focus{border-color:" + ACCENT + "}" +
@@ -49,7 +50,7 @@
     "<div class='wrap'><div class='panel' role='dialog' aria-label='" + TITLE + "'>" +
     "<div class='head'><span>" + TITLE + "</span><span class='tools'>" + (SETTINGS ? "<button class='gear' aria-label='Settings' title='API key and model settings'>&#9881;</button>" : "") + "<button class='x' aria-label='Close'>&times;</button></span></div>" +
     "<div class='log' aria-live='polite'></div>" +
-    "<form class='form'><input type='text' maxlength='2000' placeholder='Ask about an NSE stock' aria-label='Message'><button type='submit'>Send</button></form>" +
+    "<form class='form'><input type='text' maxlength='2000' placeholder='Ask about a stock or a sector' aria-label='Message'><button type='submit'>Send</button></form>" +
     "<div class='note'>Information only, not investment advice. Data is from NSE and may be delayed. Signals come from simple fixed rules and can be wrong.</div>" +
     "</div><button class='fab' aria-label='Open " + TITLE + "'>&#128172;</button></div>";
   var wrap = root.querySelector(".wrap");
@@ -79,12 +80,22 @@
   }
 
   function welcome() {
-    add("bot", "Hi! I can look up NSE stocks, show the latest rule-based setup, backtest it, and show today's top movers. What would you like to see?");
+    add("bot", "Hi! I can look up NSE stocks, show the latest rule-based setups, backtest them, show today's top movers, and read sector momentum, sector rotation and stocks to review from the strong sectors (load sectors in the Sectors tab first). What would you like to see?");
     var chips = el("div", "chips");
-    ["Analyse TCS", "Support and resistance for TCS", "Backtest INFY", "Today's top gainers and losers"].forEach(function (q) {
+    ["Analyse TCS", "Which sectors are improving?", "Stocks to review from strong sectors", "Sector rotation this week", "Support and resistance for TCS", "Backtest INFY", "Today's top gainers and losers"].forEach(function (q) {
       var c = el("button", "chip", q); c.type = "button"; c.onclick = function () { chips.remove(); ask(q); }; chips.appendChild(c);
     });
     log.appendChild(chips);
+  }
+
+  // Which data the answer came from, in plain words, so you can see (for example) that the sector tools were used.
+  var TOOL_LABELS = { search_symbol: "symbol search", analyze_stock: "stock analysis", backtest_stock: "backtest", sr_levels: "support/resistance",
+    sector_momentum: "sector momentum", sector_rotation: "sector rotation", sector_picks: "sector picks", suggest_stocks: "stock suggestions",
+    live_quote: "live quote", market_movers: "market movers", my_watchlist: "your evaluation list" };
+  function showUsed(m, used) {
+    var seen = {}, names = [];
+    (used || []).forEach(function (t) { var n = TOOL_LABELS[t] || t; if (!seen[n]) { seen[n] = 1; names.push(n); } });
+    if (names.length) m.appendChild(el("div", "used", "Used: " + names.join(", ")));
   }
 
   async function ask(text) {
@@ -101,7 +112,7 @@
         })())) });
       var data = await res.json().catch(function () { return {}; });
       if (!res.ok) { var err = new Error(typeof data.detail === "string" ? data.detail : "Something went wrong. Please try again."); err.code = data.code; throw err; }
-      history.push({ role: "assistant", content: data.reply }); add("bot", data.reply);
+      history.push({ role: "assistant", content: data.reply }); showUsed(add("bot", data.reply), data.tools_used);
     } catch (e) {
       history.pop();
       var m = add("err", e.message === "Failed to fetch" ? "Couldn't reach the assistant. Check your connection and try again." : e.message);
