@@ -22,6 +22,8 @@ Unzip over the project folder (same level as server.py). Files under `static/` g
 | sectors.py, static/index.html, sector_map.example.json | `sector_map.json` now MERGES with the built-in lists (add `"_mode": "replace"` to use only your file). The Sectors tab shows where the file goes and whether it was found. Example file included. |
 | sectors.py, server.py, static/index.html | **Stocks to review**: a mechanical shortlist from sector momentum, rotation and the stocks' own setups, with reasons and cautions; tick stocks and send them to Portfolio analysis. `/api/sectors/picks`. |
 | agent_tools.py, agent.py | New `sector_picks` assistant tool (the Stocks to review shortlist). |
+| static/TradeTheTrend-User-Manual.pdf, static/index.html | The illustrated user guide (PDF) is part of the app: a **Guide** link in the top bar and a **User guide** panel in Settings. |
+| static/index.html | **Table filters** on every table with 4+ rows in every tab: a filter box under each column heading (text, `>5`, `<=-2`, `3..8`, `a, b`, `!x`), click a heading to sort, a row count and Clear filters. Filters survive refreshes. "Select all" now selects only the rows left showing. |
 | DEPLOY.md | New section 10c describing the two rule sets. |
 
 No new dependencies. Information only, not investment advice.

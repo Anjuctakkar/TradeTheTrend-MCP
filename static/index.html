@@ -34,6 +34,15 @@
   .tab { display: flex; align-items: center; padding: 0 14px; cursor: pointer; color: var(--muted); font-size: 13.5px; border-bottom: 2px solid transparent; }
   .tab:hover { color: var(--text); }
   .tab.active { color: var(--text); border-bottom-color: var(--accent2); }
+  .tablink { display: flex; align-items: center; padding: 0 14px; color: var(--muted); font-size: 13.5px; text-decoration: none; border-bottom: 2px solid transparent; }
+  .tablink:hover { color: var(--text); }
+  a.btnlink { display: inline-block; width: auto; margin-top: 0; padding: 9px 16px; border-radius: 6px; font-weight: 600; font-size: 13px; text-decoration: none; background: var(--accent2); color: #fff; }
+  a.btnlink.alt { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  .fltrow td.flt { padding: 3px 4px; text-align: left !important; white-space: nowrap; background: rgba(255,255,255,0.02); }
+  .fltrow td.flt input { width: 100%; min-width: 46px; padding: 2px 5px; font-size: 11.5px; border-radius: 4px; }
+  .fltbar { font-size: 12px; color: var(--muted); margin: 0 0 4px; }
+  .fltbar button { width: auto; padding: 1px 8px; font-size: 11.5px; margin: 0 0 0 8px; cursor: pointer; }
+  th .sortmark { color: var(--accent2); }
 
   /* ---- shell: sidebar + main ---- */
   .view { display: none; }
@@ -188,7 +197,7 @@
 <body>
 
 <div class="topbar">
-  <div class="brand">NSE MCP Dashboard<small>Bhavcopy and CM market data · S/R build 2026-10-16.9</small></div>
+  <div class="brand">NSE MCP Dashboard<small>Bhavcopy and CM market data · S/R build 2026-10-16.11</small></div>
   <nav class="tabs">
     <div class="tab active" data-view="analysis">Portfolio analysis</div>
     <div class="tab" data-view="eval">Evaluation</div>
@@ -197,6 +206,7 @@
     <div class="tab" data-view="bhavcopy">Bhavcopy (EOD)</div>
     <div class="tab" data-view="cm">CM market data</div>
     <div class="tab" data-view="settings" style="margin-left:auto">&#9881; Settings</div>
+    <a class="tablink" href="/TradeTheTrend-User-Manual.pdf" target="_blank" rel="noopener" title="Open the illustrated user guide (PDF)">&#128214; Guide</a>
   </nav>
   <button type="button" class="chipbtn" id="logoutBtn" style="display:none">Log out</button>
 </div>
@@ -313,6 +323,11 @@
 
 <section class="view" id="view-settings">
   <div class="main" style="max-width:780px">
+    <div class="panel" id="guidePanel">
+      <h2>User guide</h2>
+      <div class="hint" style="margin-top:0">The TradeTheTrend illustrated guide: what each tab does, how to read a stock card, sectors, rotation, the assistant and what to do when something looks wrong. It is also linked as <b>Guide</b> in the top bar. Information only, not investment advice.</div>
+      <div class="btnrow"><a class="btnlink" href="/TradeTheTrend-User-Manual.pdf" target="_blank" rel="noopener">Open the guide (PDF)</a><a class="btnlink alt" href="/TradeTheTrend-User-Manual.pdf" download>Download</a></div>
+    </div>
     <div class="panel" id="adminKeyPanel">
       <h2>Anthropic API key</h2>
       <div class="hint" style="margin-top:0">The chat assistant uses this key to call Claude. The rest of the dashboard doesn't need it. It is saved in the <code>.env</code> file on this computer and is never shown again in full.</div>
@@ -1267,7 +1282,7 @@ function renderEval() {
   out.querySelectorAll(".chipbtn").forEach(b => b.addEventListener("click", () => { evalFilter = b.dataset.f; renderEval(); }));
   const all = out.querySelector("#evAll");
   all.checked = shown.length > 0 && shown.every(r => evalSelected.has(r.id));
-  all.addEventListener("change", () => { shown.forEach(r => all.checked ? evalSelected.add(r.id) : evalSelected.delete(r.id)); renderEval(); });
+  all.addEventListener("change", () => { const vis = shownKeys(out, ".evSel", "id"); shown.filter(r => vis.has(r.id)).forEach(r => all.checked ? evalSelected.add(r.id) : evalSelected.delete(r.id)); renderEval(); });
   out.querySelectorAll(".evSel").forEach(b => b.addEventListener("change", () => { b.checked ? evalSelected.add(b.dataset.id) : evalSelected.delete(b.dataset.id); updateBtLabel(); all.checked = shown.every(r => evalSelected.has(r.id)); }));
   out.querySelectorAll(".evTaken").forEach(b => b.addEventListener("change", () => {
     if (evalOutcome[b.dataset.id]) evalOutcome[b.dataset.id].taken = b.checked;
@@ -1728,7 +1743,7 @@ async function secPicks() {
   const refresh = () => { const n = shown.filter(x => secPickSel.has(x)).length; btn.disabled = n === 0;
     btn.textContent = n ? `Send ${Math.min(n, 15)} selected to Portfolio analysis` : "Select stocks to send to Portfolio analysis"; all.checked = n === shown.length; };
   box.querySelectorAll(".secPickBox").forEach(b => b.addEventListener("change", () => { b.checked ? secPickSel.add(b.dataset.s) : secPickSel.delete(b.dataset.s); refresh(); }));
-  all.addEventListener("change", () => { shown.forEach(x => all.checked ? secPickSel.add(x) : secPickSel.delete(x)); box.querySelectorAll(".secPickBox").forEach(b => { b.checked = all.checked; }); refresh(); });
+  all.addEventListener("change", () => { const vis = shownKeys(box, ".secPickBox", "s"); shown.filter(x => vis.has(x)).forEach(x => all.checked ? secPickSel.add(x) : secPickSel.delete(x)); box.querySelectorAll(".secPickBox").forEach(b => { if (vis.has(b.dataset.s)) b.checked = all.checked; }); refresh(); });
   btn.addEventListener("click", () => secSendSymbols(shown.filter(x => secPickSel.has(x)), "sector picks"));
   refresh();
 }
@@ -1852,8 +1867,9 @@ function renderSectors() {
   };
   out.querySelectorAll(".secPick").forEach(b => b.addEventListener("change", () => { b.checked ? secState.picked.add(b.dataset.s) : secState.picked.delete(b.dataset.s); refreshSend(); }));
   allBox.addEventListener("change", () => {
-    stocks.forEach(x => allBox.checked ? secState.picked.add(x.symbol) : secState.picked.delete(x.symbol));
-    out.querySelectorAll(".secPick").forEach(b => { b.checked = allBox.checked; });
+    const vis = shownKeys(out, ".secPick", "s");
+    stocks.filter(x => vis.has(x.symbol)).forEach(x => allBox.checked ? secState.picked.add(x.symbol) : secState.picked.delete(x.symbol));
+    out.querySelectorAll(".secPick").forEach(b => { if (vis.has(b.dataset.s)) b.checked = allBox.checked; });
     refreshSend();
   });
   refreshSend();
@@ -1874,6 +1890,87 @@ document.querySelector('.tab[data-view="sectors"]').addEventListener("click", se
 document.getElementById("secEvery").addEventListener("change", secSchedule);
 document.getElementById("secRotLevel").addEventListener("change", secRotation);
 document.getElementById("secCap").addEventListener("change", async () => { try { await secRank(); } catch (e) {} renderSectors(); });
+
+/* ================= Table filters: every table with 4+ rows gets column filters, click-to-sort headings and a row count ================= */
+const tblState = {};
+const cellNum = t => { const m = String(t).replace(/\u2212/g, "-").match(/-?\d[\d,]*\.?\d*/); return m ? parseFloat(m[0].replace(/,/g, "")) : null; };
+const toNum = s => parseFloat(String(s).replace(/,/g, ""));
+/** Does a cell's text pass one filter? Text = contains; >5, <=-2, =3, 3..8 for numbers; "a, b" = either; leading ! = not. */
+function colMatch(text, f) {
+  f = String(f || "").trim();
+  if (!f) return true;
+  const neg = f[0] === "!";
+  if (neg) f = f.slice(1).trim();
+  if (!f) return true;
+  const n = cellNum(text);
+  const hit = f.split(",").some(part => {
+    part = part.trim();
+    if (!part) return false;
+    const m = part.match(/^(>=|<=|>|<|=)\s*(-?[\d.,]+)$/), r = part.match(/^(-?[\d.,]+)\s*\.\.\s*(-?[\d.,]+)$/);
+    if (m) { if (n == null) return false; const v = toNum(m[2]); return m[1] === ">" ? n > v : m[1] === "<" ? n < v : m[1] === ">=" ? n >= v : m[1] === "<=" ? n <= v : n === v; }
+    if (r) { if (n == null) return false; const a = toNum(r[1]), b = toNum(r[2]); return n >= Math.min(a, b) && n <= Math.max(a, b); }
+    return String(text).toLowerCase().includes(part.toLowerCase());
+  });
+  return neg ? !hit : hit;
+}
+const isWide = tr => [...tr.cells].some(c => c.colSpan > 1);          // error and note rows span the table: shown unless the first column filter rejects them
+function enhanceTable(t) {
+  if (t.dataset.flt) return;
+  const thead = t.tHead, body = t.tBodies[0];
+  if (!thead || !body || !thead.rows.length || body.rows.length < 4) return;       // small tables don't need filters
+  t.dataset.flt = "1";
+  const head = thead.rows[thead.rows.length - 1], ths = [...head.cells], root = t.closest("[id]");
+  const key = (root ? root.id : "") + "|" + (root ? [...root.querySelectorAll("table")].indexOf(t) : 0) + "|" + ths.map(h => h.textContent.trim()).join("/");
+  const st = tblState[key] || (tblState[key] = { f: [], sort: null });          // kept across re-draws, so a refresh doesn't clear your filters
+  const orig = [...body.rows], inputs = [], frow = document.createElement("tr");
+  frow.className = "fltrow";
+  const bar = document.createElement("div"), count = document.createElement("span"), clear = document.createElement("button");
+  bar.className = "fltbar"; clear.type = "button"; clear.textContent = "Clear filters";
+  bar.title = "Type in a box under a heading to filter. Numbers: >5, <=-2, 3..8. Comma means or, ! excludes. Click a heading to sort.";
+  bar.append(count, clear);
+  (t.closest(".result-scroll") || t).before(bar);
+  function apply() {
+    let shown = 0;
+    orig.forEach(tr => {
+      const cells = [...tr.cells], wide = isWide(tr);
+      const ok = st.f.every((f, j) => !f || !f.trim() || (wide ? (j !== 0 || colMatch(cells[0] ? cells[0].textContent : "", f)) : colMatch(cells[j] ? cells[j].textContent : "", f)));
+      tr.style.display = ok ? "" : "none";
+      if (ok) shown++;
+    });
+    if (st.sort) {
+      const { col, dir } = st.sort, val = tr => (tr.cells[col] ? tr.cells[col].textContent.trim() : "");
+      const data = orig.filter(tr => !isWide(tr)).sort((a, b) => { const x = val(a), y = val(b), nx = cellNum(x), ny = cellNum(y);
+        return (nx != null && ny != null ? nx - ny : x.localeCompare(y, undefined, { numeric: true })) * dir; });
+      [...data, ...orig.filter(isWide)].forEach(tr => body.appendChild(tr));
+    } else orig.forEach(tr => body.appendChild(tr));
+    ths.forEach((th, j) => { const m = th.querySelector(".sortmark"); if (m) m.remove();
+      if (st.sort && st.sort.col === j) { const s = document.createElement("span"); s.className = "sortmark"; s.textContent = st.sort.dir === 1 ? " \u25B2" : " \u25BC"; th.appendChild(s); } });
+    const active = st.f.some(v => v && v.trim()) || st.sort;
+    count.textContent = active ? `Showing ${shown} of ${orig.length} rows` : `${orig.length} rows`;
+    clear.style.display = active ? "inline-block" : "none";
+  }
+  ths.forEach((th, j) => {
+    const td = document.createElement("td");
+    td.className = "flt";
+    frow.appendChild(td);
+    if (th.querySelector("input") || !th.textContent.trim()) return;                // checkbox or blank columns are not filtered
+    const inp = document.createElement("input");
+    inp.type = "text"; inp.placeholder = "filter"; inp.value = st.f[j] || ""; inp.setAttribute("aria-label", "Filter " + th.textContent.trim());
+    inp.addEventListener("input", () => { st.f[j] = inp.value; apply(); });
+    td.appendChild(inp); inputs.push(inp);
+    th.style.cursor = "pointer"; th.title = th.title ? th.title + " (click to sort)" : "Click to sort";
+    th.addEventListener("click", () => { st.sort = st.sort && st.sort.col === j ? (st.sort.dir === 1 ? { col: j, dir: -1 } : null) : { col: j, dir: 1 }; apply(); });
+  });
+  thead.appendChild(frow);
+  clear.addEventListener("click", () => { st.f = []; st.sort = null; inputs.forEach(i => { i.value = ""; }); apply(); });
+  apply();
+}
+let fltTimer = null;
+const enhanceAllTables = () => document.querySelectorAll("table").forEach(enhanceTable);
+new MutationObserver(() => { clearTimeout(fltTimer); fltTimer = setTimeout(enhanceAllTables, 60); }).observe(document.body, { childList: true, subtree: true });
+enhanceAllTables();
+/** Values of the ticked-or-not checkboxes in rows a filter has left visible (so "select all" means "select all shown"). */
+const shownKeys = (root, sel, attr) => new Set([...root.querySelectorAll(sel)].filter(b => b.closest("tr").style.display !== "none").map(b => b.dataset[attr]));
 
 renderRecommendPanel();
 </script>

@@ -324,6 +324,12 @@ Under the sector ranking, the **Sector rotation** chart plots each sector's rela
 
 Below the rotation chart, **Stocks to review** lists stocks from the loaded sectors that are strong or turning up: a positive 1-month return, not below their 50-day average, and either a LONG setup (trend or support/resistance rules) or a 1-month return ahead of their sector, inside a sector with a score of at least 40 or an early mover. Each gets a score out of 100 (sector 40, against its sector 30, setups 30), the reasons, and cautions (extended, mid or small cap, no live price). At most 4 per sector. Tick stocks and send only those to Portfolio analysis. It is a mechanical screen of past prices, not a recommendation. It uses sectors already loaded, so load several for a useful list.
 
+The illustrated user guide is `static/TradeTheTrend-User-Manual.pdf`. It is served by the app (so it needs sign-in like every other page) and linked as **Guide** in the top bar and under Settings > User guide. To update it, replace that file and redeploy. It opens in its own tab rather than inside the page, because the app's security headers forbid framing.
+
+## 10g. Table filters
+
+Every table with four or more rows, in every tab, has a filter box under each column heading and click-to-sort headings, plus a row count and **Clear filters**. In a box, type text (contains), a comparison for numbers (`>5`, `<=-2`, `=3`), a range (`3..8`), several choices separated by commas (`TCS, INFY`), or start with `!` to exclude. Filters are kept when a tab refreshes itself (for example Live). Tick-all boxes only tick the rows left showing. Tables with fewer than four rows are left alone.
+
 ## 11. Troubleshooting
 
 | Symptom | Likely cause and fix |

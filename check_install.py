@@ -16,8 +16,11 @@ checks = [
     ("agent_tools.py", "sr_levels"),
     ("agent.py", "sr_levels"),
     (os.path.join("static", "index.html"), "S/R LONG SETUP"),
-    (os.path.join("static", "index.html"), "S/R build 2026-10-16.9"),
+    (os.path.join("static", "index.html"), "S/R build 2026-10-16.11"),
     (os.path.join("static", "index.html"), "discRun"),
+    (os.path.join("static", "index.html"), "function enhanceTable"),
+    (os.path.join("static", "index.html"), "TradeTheTrend-User-Manual.pdf"),
+    (os.path.join("static", "TradeTheTrend-User-Manual.pdf"), "%PDF"),
     (os.path.join("static", "index.html"), "secRotation"),
     ("agent_tools.py", "sector_rotation"),
     ("agent_tools.py", "sector_picks"),
@@ -30,7 +33,7 @@ bad = 0
 for rel, needle in checks:
     p = os.path.join(here, rel)
     try:
-        ok = needle in open(p, encoding="utf-8").read()
+        ok = needle in open(p, encoding="utf-8", errors="ignore").read()
     except FileNotFoundError:
         ok = False
     print(("OK    " if ok else "MISSING"), rel, "->", needle)
