@@ -3,42 +3,47 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>NSE MCP Dashboard</title>
+<title>TradeTheTrend</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <style>
   :root {
-    --bg: #0d131a;
-    --side: #111a23;
-    --panel: #151f2a;
-    --field: #0b1118;
-    --border: #233242;
-    --text: #e4ebf2;
-    --muted: #8596a6;
-    --accent: #3fb984;   /* gains / long */
-    --accent2: #5b8def;  /* primary actions */
-    --danger: #ef5a5a;
-    --warn: #e8b84b;
+    --bg: #54d0e3;       /* aqua blue page */
+    --side: #f2fcfe;     /* sidebars */
+    --panel: #ffffff;    /* cards and panels */
+    --field: #eef9fc;
+    --border: #b4dde7;
+    --text: #0b2f3d;
+    --muted: #2c5262;
+    --accent: #11865f;   /* gains / long */
+    --accent2: #0a84b8;  /* primary actions */
+    --danger: #c8372e;
+    --warn: #b86e00;
+    --bar: #0a4a5e; --bar-text: #eafcff; --bar-muted: #a7dde9;
     --topbar-h: 52px;
     --side-w: 340px;
+    --ui: "Segoe UI Variable Text", "Segoe UI", "Trebuchet MS", "Helvetica Neue", Arial, sans-serif;
+    --display: "Trebuchet MS", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
-  body { margin: 0; font-family: "Segoe UI", -apple-system, Roboto, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; font-variant-numeric: tabular-nums; }
+  body { margin: 0; font-family: var(--ui); background: var(--bg) linear-gradient(180deg, #8fe6f2 0%, #4fcfe3 45%, #2bb8d4 100%) fixed; color: var(--text); font-size: 14px; font-variant-numeric: tabular-nums; }
+  h1, h2, h3, .brand { font-family: var(--display); }
   :focus-visible { outline: 2px solid var(--accent2); outline-offset: 2px; }
 
   /* ---- top bar ---- */
-  .topbar { height: var(--topbar-h); display: flex; align-items: center; gap: 28px; padding: 0 20px; background: var(--side); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10; }
-  .brand { font-size: 15px; font-weight: 650; white-space: nowrap; }
-  .brand small { color: var(--muted); font-weight: 400; margin-left: 8px; font-size: 12px; }
-  .tabs { display: flex; gap: 2px; height: 100%; flex: 1; }
-  .tab { display: flex; align-items: center; padding: 0 14px; cursor: pointer; color: var(--muted); font-size: 13.5px; border-bottom: 2px solid transparent; }
-  .tab:hover { color: var(--text); }
-  .tab.active { color: var(--text); border-bottom-color: var(--accent2); }
+  .topbar { height: var(--topbar-h); display: flex; align-items: center; gap: 20px; padding: 0 18px; background: var(--bar); color: var(--bar-text); border-bottom: 3px solid #7fe6f5; position: sticky; top: 0; z-index: 10; }
+  .brand { font-size: 16px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+  .brand small { color: var(--bar-muted); font-weight: 400; margin-left: 8px; font-size: 12px; }
+  .tabs { display: flex; gap: 0; height: 100%; flex: 1; overflow-x: auto; }
+  .tab { display: flex; align-items: center; padding: 0 12px; cursor: pointer; color: var(--bar-muted); font-size: 13.5px; font-weight: 600; white-space: nowrap; border-bottom: 3px solid transparent; margin-bottom: -3px; }
+  .tab:hover { color: #fff; }
+  .tab.active { color: #fff; border-bottom-color: #fff; }
+  .topbar .chipbtn { color: var(--bar-text); border-color: rgba(255,255,255,.45); }
   .tablink { display: flex; align-items: center; padding: 0 14px; color: var(--muted); font-size: 13.5px; text-decoration: none; border-bottom: 2px solid transparent; }
   .tablink:hover { color: var(--text); }
   a.btnlink { display: inline-block; width: auto; margin-top: 0; padding: 9px 16px; border-radius: 6px; font-weight: 600; font-size: 13px; text-decoration: none; background: var(--accent2); color: #fff; }
   a.btnlink.alt { background: transparent; border: 1px solid var(--border); color: var(--text); }
-  .fltrow td.flt { padding: 3px 4px; text-align: left !important; white-space: nowrap; background: rgba(255,255,255,0.02); }
+  .fltrow td.flt { padding: 3px 4px; text-align: left !important; white-space: nowrap; background: rgba(10,132,184,0.05); }
   .fltrow td.flt input { width: 100%; min-width: 46px; padding: 2px 5px; font-size: 11.5px; border-radius: 4px; }
   .fltbar { font-size: 12px; color: var(--muted); margin: 0 0 4px; }
   .fltbar button { width: auto; padding: 1px 8px; font-size: 11.5px; margin: 0 0 0 8px; cursor: pointer; }
@@ -91,7 +96,7 @@
   th, td { text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
   th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
   td:not(:first-child), th:not(:first-child) { text-align: right; }
-  tr:hover td { background: rgba(255,255,255,0.025); }
+  tr:hover td { background: rgba(10,132,184,0.07); }
   pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; background: var(--field); padding: 12px; border-radius: 6px; border: 1px solid var(--border); max-height: 65vh; overflow: auto; }
   .result-scroll { max-height: 65vh; overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
   .empty { color: var(--muted); font-size: 13px; padding: 48px 20px; text-align: center; line-height: 1.6; }
@@ -129,7 +134,7 @@
   .signal-box.long { border-color: var(--accent); background: rgba(63,185,132,0.07); }
   .signal-box.no-trade { background: rgba(133,150,166,0.05); }
   .signal-badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 4px; margin-right: 8px; }
-  .signal-badge.long { background: var(--accent); color: #06251a; }
+  .signal-badge.long { background: var(--accent); color: #fff; }
   .signal-badge.no-trade { background: var(--border); color: var(--muted); }
   .signal-figures { display: flex; gap: 22px; flex-wrap: wrap; margin: 10px 0 8px; }
   .signal-figures .label { font-size: 12px; color: var(--muted); }
@@ -192,24 +197,100 @@
   details.stockdet[open] summary { margin-bottom: 8px; }
   .chart-wrap.mid { height: 220px; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+  /* ---- home: nine cards ---- */
+  .home { max-width: 1080px; margin: 0 auto; padding: 34px 22px 64px; }
+  .home-head { margin-bottom: 26px; }
+  .home-head h1 { font-size: 38px; line-height: 1.1; margin: 0 0 6px; color: #06303f; letter-spacing: -0.02em; }
+  .home-head p { margin: 0; font-size: 16px; color: #0b3d4f; max-width: 46em; }
+  .home-note { display: inline-block; margin-top: 12px; padding: 4px 12px; border-radius: 999px; background: rgba(255,255,255,.55); font-size: 12.5px; color: #0b3d4f; }
+  .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+  .cards .card { display: block; width: auto; text-align: left; font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 18px; padding: 22px 22px 18px; cursor: pointer; box-shadow: 0 6px 18px rgba(6,70,90,.14); transition: transform .15s, box-shadow .15s; }
+  .cards .card:hover, .cards .card:focus-visible { transform: translateY(-4px); box-shadow: 0 12px 26px rgba(6,70,90,.24); }
+  .card .ci { display: inline-block; width: 52px; height: 52px; line-height: 52px; text-align: center; font-size: 26px; border-radius: 14px; margin-bottom: 12px; }
+  .card h3 { margin: 0 0 6px; font-size: 19px; color: #06303f; }
+  .card p { margin: 0 0 14px; font-size: 13.5px; line-height: 1.5; color: var(--muted); min-height: 60px; }
+  .card .tag { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: #e1f6fb; color: #08566f; }
+  .card .go { float: right; font-weight: 700; color: var(--accent2); font-size: 13.5px; }
+  @media (max-width: 900px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 560px) { .cards { grid-template-columns: 1fr; } .home-head h1 { font-size: 30px; } }
+  @media (prefers-reduced-motion: reduce) { .cards .card { transition: none; } }
+  /* ---- guide and FAQ ---- */
+  .guide { max-width: 860px; margin: 0 auto; padding: 30px 22px 60px; }
+  .guide h1 { font-size: 30px; margin: 0 0 6px; color: #06303f; }
+  .guide .lede { margin: 0 0 16px; font-size: 15px; color: #0b3d4f; }
+  #faqList details { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 0 16px; margin-bottom: 10px; }
+  #faqList summary { cursor: pointer; padding: 13px 0; font-weight: 700; font-size: 14.5px; font-family: var(--display); }
+  #faqList details[open] summary { color: var(--accent2); }
+  #faqList details p, #faqList details ul { margin: 0 0 12px; line-height: 1.55; color: var(--muted); }
+  #faqList details ul { padding-left: 20px; }
+  #faqSearch { max-width: 420px; margin: 4px 0 14px; }
 </style>
 </head>
 <body>
 
 <div class="topbar">
-  <div class="brand">NSE MCP Dashboard<small>Bhavcopy and CM market data · S/R build 2026-10-16.11</small></div>
+  <div class="brand" title="Back to the home page">TradeTheTrend<small>by EdgewithAI · S/R build 2026-10-16.12</small></div>
   <nav class="tabs">
-    <div class="tab active" data-view="analysis">Portfolio analysis</div>
+    <div class="tab active" data-view="home">Home</div>
+    <div class="tab" data-view="analysis">Portfolio analysis</div>
     <div class="tab" data-view="eval">Evaluation</div>
     <div class="tab" data-view="sectors">Sectors</div>
     <div class="tab" data-view="live">Live</div>
     <div class="tab" data-view="bhavcopy">Bhavcopy (EOD)</div>
     <div class="tab" data-view="cm">CM market data</div>
     <div class="tab" data-view="settings" style="margin-left:auto">&#9881; Settings</div>
-    <a class="tablink" href="/TradeTheTrend-User-Manual.pdf" target="_blank" rel="noopener" title="Open the illustrated user guide (PDF)">&#128214; Guide</a>
+    <div class="tab" data-view="guide">&#128214; Guide &amp; FAQ</div>
   </nav>
   <button type="button" class="chipbtn" id="logoutBtn" style="display:none">Log out</button>
 </div>
+
+<section class="view active" id="view-home">
+  <div class="home">
+    <div class="home-head">
+      <h1>TradeTheTrend</h1>
+      <p>Rule-based analysis for NSE stocks. Pick a place to start.</p>
+      <span class="home-note">Information only, not investment advice.</span>
+    </div>
+    <div class="cards">
+      <button type="button" class="card" data-go="analysis"><span class="ci" style="background:#dbeafe">&#128200;</span><h3>Portfolio Analysis</h3><p>Type in stocks and see charts, rule setups, entry, stop and target, funding and net profit or loss.</p><span class="tag">Analyse</span><span class="go">Open &rarr;</span></button>
+      <button type="button" class="card" data-go="sectors"><span class="ci" style="background:#d1f5ee">&#129517;</span><h3>Sectors</h3><p>See which sectors are gaining, with daily, weekly and monthly charts, rotation and stocks to review.</p><span class="tag">Discover</span><span class="go">Open &rarr;</span></button>
+      <button type="button" class="card" data-go="eval"><span class="ci" style="background:#ede4fb">&#128203;</span><h3>Evaluation</h3><p>Your report card: how your picks did, plus backtests of the rules on past prices.</p><span class="tag">Track</span><span class="go">Open &rarr;</span></button>
+      <button type="button" class="card" data-go="live"><span class="ci" style="background:#fff0c9">&#9889;</span><h3>Live</h3><p>Watch live prices for your stocks and today's top gainers and losers.</p><span class="tag">Watch</span><span class="go">Open &rarr;</span></button>
+      <button type="button" class="card" data-go="bhavcopy"><span class="ci" style="background:#e3e9ee">&#128193;</span><h3>Bhavcopy (EOD)</h3><p>Explore end-of-day price data and try the data tools by hand.</p><span class="tag">Data</span><span class="go">Open &rarr;</span></button>
+      <button type="button" class="card" data-go="cm"><span class="ci" style="background:#d9f0f7">&#128225;</span><h3>CM Market Data</h3><p>Explore the live market data tools and quotes directly.</p><span class="tag">Data</span><span class="go">Open &rarr;</span></button>
+      <button type="button" class="card" data-go="settings"><span class="ci" style="background:#e5ecf0">&#9881;&#65039;</span><h3>Settings</h3><p>Assistant key, funding rules, connection tests and tool discovery.</p><span class="tag">Set up</span><span class="go">Open &rarr;</span></button>
+      <button type="button" class="card" data-go="guide"><span class="ci" style="background:#dff5e4">&#128214;</span><h3>Guide / FAQ</h3><p>The illustrated guide and quick answers to common questions.</p><span class="tag">Help</span><span class="go">Open &rarr;</span></button>
+      <button type="button" class="card" data-go="assistant"><span class="ci" style="background:#fde3ec">&#128172;</span><h3>Assistant</h3><p>Ask about stocks, sectors, rotation and stocks to review in plain words.</p><span class="tag">Chat</span><span class="go">Open &rarr;</span></button>
+    </div>
+  </div>
+</section>
+
+<section class="view" id="view-guide">
+  <div class="guide">
+    <h1>Guide &amp; FAQ</h1>
+    <p class="lede">Quick answers below. For pictures and step-by-step lessons, open the illustrated guide.</p>
+    <div class="btnrow" style="margin:0 0 16px"><a class="btnlink" href="/TradeTheTrend-User-Manual.pdf" target="_blank" rel="noopener">Open the illustrated guide (PDF)</a><a class="btnlink alt" href="/TradeTheTrend-User-Manual.pdf" download>Download</a></div>
+    <input type="text" id="faqSearch" placeholder="Search the questions" aria-label="Search the questions" autocomplete="off" />
+    <div id="faqList">
+<details><summary>What is TradeTheTrend?</summary><p>A dashboard that applies simple, fixed rules to past NSE prices and shows the results: charts, rule setups, sector momentum, rotation and more. It is for information and learning. It is not investment advice, and the rules can be wrong.</p></details>
+<details><summary>What does "No trade" mean?</summary><p>The rules do not see a setup they like. That is a normal answer: the rules are picky on purpose, so most stocks get "No trade" on most days.</p></details>
+<details><summary>What is a LONG setup, and what are entry, stop and target?</summary><p>A LONG setup is a plan to buy and hope the price rises. <b>Entry</b> is the price to buy at, <b>stop</b> is the safety line below it, and <b>target</b> is the goal above it. The setup is built from last night's close, so check the current price shown next to it.</p></details>
+<details><summary>What do the live, last trade and EOD badges mean?</summary><ul><li><b>live</b>: the market is open and the price is fresh.</li><li><b>last trade</b>: the market is closed; this is the last traded price.</li><li><b>EOD</b>: no current price was available, so the last end-of-day close is shown.</li></ul></details>
+<details><summary>Why does a setup say it no longer applies?</summary><p>The current price is already below the stop or above the target, so the plan as written is out of date. Wait for the next day's rules output or study the stock again.</p></details>
+<details><summary>What is the difference between the two rule sets?</summary><p><b>Trend and momentum</b> checks averages, MACD and RSI. <b>Support and resistance</b> looks for bounces off price floors and breakouts through price ceilings. Each has its own entry, stop and target, and the stock card notes whether they agree.</p></details>
+<details><summary>What does 1D mean in the Sectors tab?</summary><p>The newest traded price (LTP) compared with yesterday's close. When the market is closed it is the last trade against the previous close.</p></details>
+<details><summary>Why does loading sectors take so long, and why is a stock missing?</summary><p>The first load fetches many stocks from NSE. Load one sector at a time to be quicker. Sector lists are short, hand-picked baskets, so some stocks are missing. Add your own in <code>sector_map.json</code> (the Sectors tab shows where it goes). A stock that could not load is listed under <b>Not included</b> below the sector chart.</p></details>
+<details><summary>What are sector rotation and early movers?</summary><p>Rotation shows each sector's strength against the other sectors you loaded. A sector that is still behind but speeding up is <b>Improving</b> and flagged as an early mover. Rotations often fail, so confirm with the stocks themselves.</p></details>
+<details><summary>Are "Stocks to review" recommendations?</summary><p>No. They are a mechanical shortlist of stocks in strong sectors with a positive month and LONG setups, with reasons and cautions. Review each one yourself, and check its current price and costs.</p></details>
+<details><summary>Where is my Evaluation list kept?</summary><p>On your own computer, in your browser, not on the server. A browser can clear its storage, so use <b>Create a file</b> or <b>Download a copy</b> in the Evaluation tab to keep a copy.</p></details>
+<details><summary>Why does the Assistant say it is unavailable?</summary><p>It needs an Anthropic API key with credit, set by an administrator in Settings. For sector questions, open the Sectors tab and click <b>Load sectors</b> first.</p></details>
+<details><summary>How do I filter or sort a table?</summary><p>Type in the small box under a column name. Numbers accept <b>&gt;5</b>, <b>&lt;=-2</b> and <b>3..8</b>; put a comma between choices (<b>TCS, INFY</b>); start with <b>!</b> to leave something out. Click a column name to sort and <b>Clear filters</b> to start over.</p></details>
+<details><summary>The page looks old or something is missing</summary><p>Press Ctrl+F5 to refresh fully. The build stamp next to the title and <code>/health</code> show which version the server is running. If the server was not restarted after an update, new features will not appear.</p></details>
+<details><summary>Is any of this investment advice?</summary><p>No. Everything here is information from simple rules applied to past prices. Decisions are yours; consider speaking to a SEBI-registered adviser, and never use money you cannot afford to lose.</p></details>
+    </div>
+  </div>
+</section>
 
 <section class="view" id="view-bhavcopy"></section>
 <section class="view" id="view-cm"></section>
@@ -401,7 +482,7 @@
   </div>
 </section>
 
-<section class="view active" id="view-analysis">
+<section class="view" id="view-analysis">
   <div class="layout">
     <aside class="sidebar">
       <div class="side-section">
@@ -903,7 +984,7 @@ function renderCmpLine(r) {
 function ltpDateHtml(r) {
   if (!r.ltp_date) return "—";
   const stale = r.ltp_age_days != null && r.ltp_age_days > 3;
-  const note = stale ? ` <span style="color:#e8b84b" title="Latest data on file is ${r.ltp_age_days} days old">(${r.ltp_age_days}d old)</span>` : "";
+  const note = stale ? ` <span style="color:#c47f00" title="Latest data on file is ${r.ltp_age_days} days old">(${r.ltp_age_days}d old)</span>` : "";
   return fmtDate(r.ltp_date) + note;
 }
 
@@ -976,14 +1057,14 @@ function renderCostBox(r) {
 
 function renderCaNotes(r) {
   if (r.ca_status === "unavailable")
-    return `<div class="hint" style="color:#e8b84b;margin-bottom:8px">Corporate actions could not be fetched, so prices are unchecked for splits/bonuses.</div>`;
+    return `<div class="hint" style="color:#c47f00;margin-bottom:8px">Corporate actions could not be fetched, so prices are unchecked for splits/bonuses.</div>`;
   const notes = r.ca_notes || [];
   if (!notes.length) return `<div class="hint" style="margin-bottom:8px">No corporate actions in this window.</div>`;
   const items = notes.map(n => {
-    const tag = n.adjusted ? `<b style="color:#e8b84b">${escapeHtml(n.type)} - prices before this date adjusted (factor ${n.factor})</b>` : `${escapeHtml(n.type)} - no price adjustment`;
+    const tag = n.adjusted ? `<b style="color:#c47f00">${escapeHtml(n.type)} - prices before this date adjusted (factor ${n.factor})</b>` : `${escapeHtml(n.type)} - no price adjustment`;
     return `<li>${fmtDate(n.exDate)}: ${tag}${n.purpose ? " &middot; " + escapeHtml(n.purpose) : ""}</li>`;
   }).join("");
-  const adj = notes.some(n => n.adjusted) ? `<div class="hint" style="color:#e8b84b">Server MA20/MA50 above are unadjusted and may differ from the chart SMAs.</div>` : "";
+  const adj = notes.some(n => n.adjusted) ? `<div class="hint" style="color:#c47f00">Server MA20/MA50 above are unadjusted and may differ from the chart SMAs.</div>` : "";
   return `<div class="hint" style="margin-bottom:8px">Corporate actions (ex-date in window):<ul class="signal-reasons">${items}</ul>${adj}</div>`;
 }
 
@@ -1036,7 +1117,7 @@ function renderAnalysis(results, mode, unallocated, fsum) {
     <thead><tr><th>Symbol</th><th>Weight</th><th>Allocated</th><th>CMP</th><th>CMP as of</th><th>Qty</th><th>Invested</th><th>Leftover</th><th>Trend signal</th><th>Entry</th><th>Stop loss</th><th>Target</th><th>Hold</th><th>52w low</th><th>52w high</th><th>S/R signal</th></tr></thead>
     <tbody>${results.map(r => r.error
       ? `<tr><td>${escapeHtml(r.symbol)}</td><td colspan="15" style="color:var(--danger)">${escapeHtml(r.error)}</td></tr>`
-      : `<tr><td>${escapeHtml(r.symbol)}${(r.corporate_adjustments||[]).length ? ' <span title="Split/bonus adjusted" style="color:#e8b84b">CA</span>' : ''}</td><td>${r.weight_pct != null ? r.weight_pct + "%" : "—"}</td><td>₹${(r.allocation||0).toLocaleString("en-IN")}</td><td>${r.latest_price ?? "—"}${r.cmp_change_pct != null ? ` <span class="${r.cmp_change_pct >= 0 ? "pos" : "neg"}" style="font-size:12px">${r.cmp_change_pct >= 0 ? "+" : "−"}${Math.abs(r.cmp_change_pct)}%</span>` : ""}</td><td>${cmpAsOf(r)}</td><td>${r.quantity ?? "—"}</td><td>₹${(r.invested||0).toLocaleString("en-IN")}</td><td>₹${(r.leftover||0).toLocaleString("en-IN")}</td>
+      : `<tr><td>${escapeHtml(r.symbol)}${(r.corporate_adjustments||[]).length ? ' <span title="Split/bonus adjusted" style="color:#c47f00">CA</span>' : ''}</td><td>${r.weight_pct != null ? r.weight_pct + "%" : "—"}</td><td>₹${(r.allocation||0).toLocaleString("en-IN")}</td><td>${r.latest_price ?? "—"}${r.cmp_change_pct != null ? ` <span class="${r.cmp_change_pct >= 0 ? "pos" : "neg"}" style="font-size:12px">${r.cmp_change_pct >= 0 ? "+" : "−"}${Math.abs(r.cmp_change_pct)}%</span>` : ""}</td><td>${cmpAsOf(r)}</td><td>${r.quantity ?? "—"}</td><td>₹${(r.invested||0).toLocaleString("en-IN")}</td><td>₹${(r.leftover||0).toLocaleString("en-IN")}</td>
           <td>${r.trade_signal?.signal === "LONG" ? "<b style='color:var(--accent)'>LONG</b>" : "<span style='color:var(--muted)'>No trade</span>"}</td>
           <td>${r.trade_signal?.entry ?? "—"}</td><td>${r.trade_signal?.stop_loss ?? "—"}</td><td>${r.trade_signal?.target ?? "—"}</td><td>${holdShort(r.hold)}</td><td>${r.week52?.status === "ok" ? fmtMoney(r.week52.low) : "—"}</td><td>${r.week52?.status === "ok" ? fmtMoney(r.week52.high) : "—"}</td><td>${srCell(r)}</td></tr>`
     ).join("")}</tbody>
@@ -1069,17 +1150,17 @@ function renderAnalysis(results, mode, unallocated, fsum) {
         datasets: [
           { label: "Close", data: r.close, borderColor: "#4f8cff", pointRadius: 0, borderWidth: 1.5, tension: 0.1 },
           { label: "SMA20", data: r.sma20, borderColor: "#3fb984", pointRadius: 0, borderWidth: 1.5, tension: 0.1 },
-          { label: "SMA50", data: r.sma50, borderColor: "#e8b84b", pointRadius: 0, borderWidth: 1.5, tension: 0.1 },
+          { label: "SMA50", data: r.sma50, borderColor: "#c47f00", pointRadius: 0, borderWidth: 1.5, tension: 0.1 },
           ...srLines(r),
         ],
       },
       options: {
         responsive: true, maintainAspectRatio: false,
         interaction: { mode: "index", intersect: false },
-        plugins: { legend: { labels: { color: "#e6edf3", boxWidth: 12 } } },
+        plugins: { legend: { labels: { color: "#10303f", boxWidth: 12 } } },
         scales: {
-          x: { ticks: { color: "#8b98a5", maxTicksLimit: 8 }, grid: { color: "#263544" } },
-          y: { ticks: { color: "#8b98a5" }, grid: { color: "#263544" } },
+          x: { ticks: { color: "#2c5262", maxTicksLimit: 8 }, grid: { color: "#cfe6ec" } },
+          y: { ticks: { color: "#2c5262" }, grid: { color: "#cfe6ec" } },
         },
       },
     }));
@@ -1089,10 +1170,10 @@ function renderAnalysis(results, mode, unallocated, fsum) {
       data: { labels: r.dates, datasets: [{ label: "RSI(14)", data: r.rsi, borderColor: "#c979e0", pointRadius: 0, borderWidth: 1.5, tension: 0.1 }] },
       options: {
         responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { labels: { color: "#e6edf3", boxWidth: 12 } } },
+        plugins: { legend: { labels: { color: "#10303f", boxWidth: 12 } } },
         scales: {
-          x: { ticks: { color: "#8b98a5", maxTicksLimit: 8 }, grid: { color: "#263544" } },
-          y: { min: 0, max: 100, ticks: { color: "#8b98a5" }, grid: { color: "#263544" } },
+          x: { ticks: { color: "#2c5262", maxTicksLimit: 8 }, grid: { color: "#cfe6ec" } },
+          y: { min: 0, max: 100, ticks: { color: "#2c5262" }, grid: { color: "#cfe6ec" } },
         },
       },
     }));
@@ -1348,10 +1429,10 @@ function renderBacktest(d, out) {
     btCharts.push(new Chart(det.querySelector("canvas"), { type: "line",
       data: { labels: r.dates, datasets: [
         { label: "Strategy", data: r.equity, borderColor: "#5b8def", pointRadius: 0, borderWidth: 1.8 },
-        { label: "Buy and hold", data: r.buy_hold, borderColor: "#8596a6", pointRadius: 0, borderWidth: 1.3, borderDash: [5, 4] }] },
+        { label: "Buy and hold", data: r.buy_hold, borderColor: "#2c5262", pointRadius: 0, borderWidth: 1.3, borderDash: [5, 4] }] },
       options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
-        plugins: { legend: { labels: { color: "#e4ebf2", boxWidth: 12 } } },
-        scales: { x: { ticks: { color: "#8596a6", maxTicksLimit: 8 }, grid: { color: "#233242" } }, y: { ticks: { color: "#8596a6" }, grid: { color: "#233242" } } } } }));
+        plugins: { legend: { labels: { color: "#10303f", boxWidth: 12 } } },
+        scales: { x: { ticks: { color: "#2c5262", maxTicksLimit: 8 }, grid: { color: "#cfe6ec" } }, y: { ticks: { color: "#2c5262" }, grid: { color: "#cfe6ec" } } } } }));
   }));
 }
 
@@ -1633,7 +1714,7 @@ const CAP_LABEL = { large: "Large", mid: "Mid", small: "Small" };
 const secBadge = s => `<span class="badge ${s === "gaining" ? "target" : s === "losing" ? "stopped" : "expired"}">${SEC_LABEL[s] || s}</span>`;
 const secPct = v => v == null ? "—" : pct(v);
 const SEC_SMA = { daily: 20, weekly: 10, monthly: 3 }, SEC_WIN = { daily: 126, weekly: 26, monthly: 12 };
-const SEC_COLORS = ["#5b8def", "#3fb984", "#e8b84b", "#c979e0", "#ef5a5a", "#4fd1d9"];
+const SEC_COLORS = ["#5b8def", "#3fb984", "#c47f00", "#c979e0", "#ef5a5a", "#4fd1d9"];
 const secCap = () => document.getElementById("secCap").value;
 const capMatch = (s, cap) => cap === "all" || (cap === "large") === (s.cap === "large");
 
@@ -1756,7 +1837,7 @@ const secRotPlugin = { id: "secRotPlugin",
     const { ctx, chartArea: a, scales: { x, y } } = chart, cx = Math.min(Math.max(x.getPixelForValue(100), a.left), a.right), cy = Math.min(Math.max(y.getPixelForValue(100), a.top), a.bottom);
     ctx.save();
     [["improving", a.left, a.top, cx - a.left, cy - a.top], ["leading", cx, a.top, a.right - cx, cy - a.top], ["lagging", a.left, cy, cx - a.left, a.bottom - cy], ["weakening", cx, cy, a.right - cx, a.bottom - cy]]
-      .forEach(([q, px, py, w, hh]) => { ctx.fillStyle = ROT_Q[q][1]; ctx.fillRect(px, py, w, hh); ctx.fillStyle = "#8596a6"; ctx.font = "12px sans-serif";
+      .forEach(([q, px, py, w, hh]) => { ctx.fillStyle = ROT_Q[q][1]; ctx.fillRect(px, py, w, hh); ctx.fillStyle = "#2c5262"; ctx.font = "12px sans-serif";
         ctx.fillText(ROT_Q[q][0], q === "leading" || q === "weakening" ? px + w - 64 : px + 8, q === "leading" || q === "improving" ? py + 16 : py + hh - 8); });
     ctx.restore();
   },
@@ -1782,8 +1863,8 @@ async function secRotation() {
       backgroundColor: SEC_COLORS[i % SEC_COLORS.length], borderWidth: it.early ? 2.4 : 1.2, tension: 0.2, pointRadius: it.trail.map((_, j) => j === it.trail.length - 1 ? 6 : 2.5) })) },
     options: { responsive: true, maintainAspectRatio: false, layout: { padding: { right: 70 } },
       plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ratio ${c.parsed.x}, momentum ${c.parsed.y}` } } },
-      scales: { x: { min: 100 - dx, max: 100 + dx, title: { display: true, text: "RS-Ratio (relative strength vs benchmark)", color: "#8596a6" }, ticks: { color: "#8596a6" }, grid: { color: "#233242" } },
-        y: { min: 100 - dy, max: 100 + dy, title: { display: true, text: "RS-Momentum", color: "#8596a6" }, ticks: { color: "#8596a6" }, grid: { color: "#233242" } } } } }));
+      scales: { x: { min: 100 - dx, max: 100 + dx, title: { display: true, text: "RS-Ratio (relative strength vs benchmark)", color: "#2c5262" }, ticks: { color: "#2c5262" }, grid: { color: "#cfe6ec" } },
+        y: { min: 100 - dy, max: 100 + dy, title: { display: true, text: "RS-Momentum", color: "#2c5262" }, ticks: { color: "#2c5262" }, grid: { color: "#cfe6ec" } } } } }));
   tbl.innerHTML = `<div class="result-scroll" style="margin-top:10px"><table class="compact"><thead><tr><th>${d.level === "industries" ? "Industry group" : "Sector"}</th><th>Quadrant</th><th class="r">RS-Ratio</th><th class="r">RS-Momentum</th><th>Signal</th></tr></thead><tbody>${
     d.items.map(it => `<tr${d.level === "sectors" ? ` class="secRotRow" data-n="${escapeHtml(it.name)}" style="cursor:pointer;${it.early ? "background:rgba(91,141,239,.12)" : ""}"` : it.early ? ' style="background:rgba(91,141,239,.12)"' : ""}><td><b>${escapeHtml(it.name)}</b>${it.early ? ' <span class="badge open">early</span>' : ""}</td><td><span class="badge ${ROT_Q[it.quadrant][2]}">${ROT_Q[it.quadrant][0]}</span></td><td class="r">${it.ratio}</td><td class="r">${it.mom}</td><td>${escapeHtml(it.signal)}</td></tr>`).join("")}</tbody></table></div>`;
   tbl.querySelectorAll(".secRotRow").forEach(tr => tr.addEventListener("click", () => { secState.sel = tr.dataset.n; secState.ind = null; renderSectors(); }));
@@ -1800,7 +1881,7 @@ function secCompare(names, tf, cap) {
   return { labels, sets: cols.map((c, i) => ({ label: c.n, data: labels.map(l => c.map[l] ?? null), borderColor: SEC_COLORS[i % SEC_COLORS.length],
     pointRadius: 0, borderWidth: c.n === secState.sel ? 2.6 : 1.4, tension: 0.1, spanGaps: true })) };
 }
-const secAxes = () => ({ x: { ticks: { color: "#8596a6", maxTicksLimit: 8 }, grid: { color: "#233242" } }, y: { ticks: { color: "#8596a6" }, grid: { color: "#233242" } } });
+const secAxes = () => ({ x: { ticks: { color: "#2c5262", maxTicksLimit: 8 }, grid: { color: "#cfe6ec" } }, y: { ticks: { color: "#2c5262" }, grid: { color: "#cfe6ec" } } });
 
 function renderSectors() {
   secState.charts.forEach(c => c.destroy()); secState.charts.length = 0;
@@ -1824,11 +1905,11 @@ function renderSectors() {
   const sorted = rows.filter(r => r[period] != null).sort((a, b) => b[period] - a[period]);
   secState.charts.push(new Chart(document.getElementById("secBars"), { type: "bar",
     data: { labels: sorted.map(r => r.name), datasets: [{ label: "Return over " + PL[period] + " (%)", data: sorted.map(r => r[period]), backgroundColor: sorted.map(r => r[period] >= 0 ? "#3fb984" : "#ef5a5a") }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: "#e4ebf2", boxWidth: 12 } } }, scales: secAxes() } }));
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: "#10303f", boxWidth: 12 } } }, scales: secAxes() } }));
   const top = rows.slice(0, 5).map(r => r.name); if (secState.sel && !top.includes(secState.sel)) top.push(secState.sel);
   const cmp = secCompare(top, tf, cap);
   secState.charts.push(new Chart(document.getElementById("secCmp"), { type: "line", data: { labels: cmp.labels, datasets: cmp.sets },
-    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false }, plugins: { legend: { labels: { color: "#e4ebf2", boxWidth: 12 } } }, scales: secAxes() } }));
+    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false }, plugins: { legend: { labels: { color: "#10303f", boxWidth: 12 } } }, scales: secAxes() } }));
   secRotation(); secPicks();
   document.querySelectorAll(".secRow").forEach(tr => tr.addEventListener("click", () => { secState.sel = tr.dataset.n; secState.ind = null; renderSectors(); }));
 
@@ -1853,8 +1934,8 @@ function renderSectors() {
   secState.charts.push(new Chart(document.getElementById("secLine"), { type: "line",
     data: { labels: ser.dates, datasets: [
       { label: "Sector index", data: ser.values, borderColor: "#5b8def", pointRadius: 0, borderWidth: 1.8, tension: 0.1 },
-      { label: n + "-" + (tf === "daily" ? "day" : tf === "weekly" ? "week" : "month") + " average", data: avg, borderColor: "#e8b84b", pointRadius: 0, borderWidth: 1.3, tension: 0.1 }] },
-    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false }, plugins: { legend: { labels: { color: "#e4ebf2", boxWidth: 12 } } }, scales: secAxes() } }));
+      { label: n + "-" + (tf === "daily" ? "day" : tf === "weekly" ? "week" : "month") + " average", data: avg, borderColor: "#c47f00", pointRadius: 0, borderWidth: 1.3, tension: 0.1 }] },
+    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false }, plugins: { legend: { labels: { color: "#10303f", boxWidth: 12 } } }, scales: secAxes() } }));
   out.querySelectorAll(".secInd").forEach(tr => tr.addEventListener("click", () => { secState.ind = tr.dataset.i; renderSectors(); }));
   const whole = document.getElementById("secWhole"); if (whole) whole.addEventListener("click", () => { secState.ind = null; renderSectors(); });
   const sendBtn = document.getElementById("secSend"), allBox = document.getElementById("secAll");
@@ -1890,6 +1971,20 @@ document.querySelector('.tab[data-view="sectors"]').addEventListener("click", se
 document.getElementById("secEvery").addEventListener("change", secSchedule);
 document.getElementById("secRotLevel").addEventListener("change", secRotation);
 document.getElementById("secCap").addEventListener("change", async () => { try { await secRank(); } catch (e) {} renderSectors(); });
+
+/* ================= Home: nine cards that open the tabs ================= */
+document.querySelectorAll("[data-go]").forEach(c => c.addEventListener("click", () => {
+  const v = c.dataset.go;
+  if (v === "assistant") { document.dispatchEvent(new CustomEvent("assistant:open")); return; }
+  const tab = document.querySelector('.tab[data-view="' + v + '"]');
+  if (tab) tab.click();
+}));
+document.querySelector(".brand").addEventListener("click", () => document.querySelector('.tab[data-view="home"]').click());
+const faqSearch = document.getElementById("faqSearch");
+faqSearch.addEventListener("input", () => {
+  const q = faqSearch.value.trim().toLowerCase();
+  document.querySelectorAll("#faqList details").forEach(d => { const hit = !q || d.textContent.toLowerCase().includes(q); d.style.display = hit ? "" : "none"; d.open = !!q && hit; });
+});
 
 /* ================= Table filters: every table with 4+ rows gets column filters, click-to-sort headings and a row count ================= */
 const tblState = {};
@@ -1975,6 +2070,6 @@ const shownKeys = (root, sel, attr) => new Set([...root.querySelectorAll(sel)].f
 renderRecommendPanel();
 </script>
 
-<script src="/agent-widget.js?v=sr20261016" data-title="Market assistant" data-accent="#5b8def" data-settings="true" defer></script>
+<script src="/agent-widget.js?v=sr20261020" data-title="Market assistant" data-accent="#0a84b8" data-settings="true" defer></script>
 </body>
 </html>

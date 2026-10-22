@@ -16,8 +16,11 @@ checks = [
     ("agent_tools.py", "sr_levels"),
     ("agent.py", "sr_levels"),
     (os.path.join("static", "index.html"), "S/R LONG SETUP"),
-    (os.path.join("static", "index.html"), "S/R build 2026-10-16.11"),
+    (os.path.join("static", "index.html"), "S/R build 2026-10-16.12"),
     (os.path.join("static", "index.html"), "discRun"),
+    (os.path.join("static", "index.html"), "view-home"),
+    (os.path.join("static", "index.html"), "faqList"),
+    ("auth.py", "TradeTheTrend"),
     (os.path.join("static", "index.html"), "function enhanceTable"),
     (os.path.join("static", "index.html"), "TradeTheTrend-User-Manual.pdf"),
     (os.path.join("static", "TradeTheTrend-User-Manual.pdf"), "%PDF"),
@@ -28,6 +31,7 @@ checks = [
     (os.path.join("static", "eval-store.js"), 'model === "sr"'),
     (os.path.join("static", "agent-widget.js"), "Which sectors are improving?"),
     (os.path.join("static", "agent-widget.js"), "function showUsed"),
+    (os.path.join("static", "agent-widget.js"), "assistant:open"),
 ]
 bad = 0
 for rel, needle in checks:

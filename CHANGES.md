@@ -24,6 +24,7 @@ Unzip over the project folder (same level as server.py). Files under `static/` g
 | agent_tools.py, agent.py | New `sector_picks` assistant tool (the Stocks to review shortlist). |
 | static/TradeTheTrend-User-Manual.pdf, static/index.html | The illustrated user guide (PDF) is part of the app: a **Guide** link in the top bar and a **User guide** panel in Settings. |
 | static/index.html | **Table filters** on every table with 4+ rows in every tab: a filter box under each column heading (text, `>5`, `<=-2`, `3..8`, `a, b`, `!x`), click a heading to sort, a row count and Clear filters. Filters survive refreshes. "Select all" now selects only the rows left showing. |
+| static/index.html, auth.py, static/agent-widget.js | **New look**: a Home page of nine cards (Portfolio Analysis, Sectors, Evaluation / Live, Bhavcopy, CM Market Data / Settings, Guide-FAQ, Assistant) that open the tabs, an aqua blue theme with matching fonts and chart colours, a **Guide & FAQ** tab (searchable FAQ plus the PDF), and a matching sign-in page. |
 | DEPLOY.md | New section 10c describing the two rule sets. |
 
 No new dependencies. Information only, not investment advice.

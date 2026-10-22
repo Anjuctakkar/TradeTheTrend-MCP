@@ -260,13 +260,13 @@ async def me(user: dict = Depends(current_user)):
 
 
 LOGIN_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sign in · NSE MCP Dashboard</title><style>
-*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0d131a;color:#e4ebf2;font-family:"Segoe UI",system-ui,sans-serif}
-.card{width:min(360px,92vw);background:#151f2a;border:1px solid #233242;border-radius:10px;padding:26px}
-h1{font-size:18px;margin:0 0 4px}p{margin:0 0 18px;color:#8596a6;font-size:13px;line-height:1.5}
-#g{min-height:44px;display:flex;justify-content:center}#err{min-height:18px;margin-top:14px;font-size:13px;color:#ef5a5a;text-align:center}
-.fine{margin:16px 0 0;font-size:11px;color:#8596a6;text-align:center}
-</style></head><body><div class="card"><h1>NSE MCP Dashboard</h1><p>Sign in with your Google account to continue. Access is by invitation.</p>
+<title>Sign in · TradeTheTrend</title><style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#4fcfe3 linear-gradient(180deg,#8fe6f2,#2bb8d4) fixed;color:#0b2f3d;font-family:"Segoe UI Variable Text","Segoe UI","Trebuchet MS",system-ui,sans-serif}
+.card{width:min(360px,92vw);background:#fff;border:1px solid #b4dde7;border-radius:16px;padding:28px;box-shadow:0 10px 26px rgba(6,70,90,.22)}
+h1{font-size:22px;margin:0 0 4px;font-family:"Trebuchet MS","Segoe UI",sans-serif;color:#06303f}p{margin:0 0 18px;color:#2c5262;font-size:13px;line-height:1.5}
+#g{min-height:44px;display:flex;justify-content:center}#err{min-height:18px;margin-top:14px;font-size:13px;color:#c8372e;text-align:center}
+.fine{margin:16px 0 0;font-size:11px;color:#2c5262;text-align:center}
+</style></head><body><div class="card"><h1>TradeTheTrend</h1><p>Sign in with your Google account to continue. Access is by invitation.</p>
 <div id="g"></div><div id="err" role="alert"></div>
 <p class="fine">Information only, not investment advice.</p></div>
 <script>

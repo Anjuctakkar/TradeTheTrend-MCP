@@ -137,5 +137,6 @@
   if (gear) gear.onclick = function () { toggle(false); document.dispatchEvent(new CustomEvent("assistant:open-settings")); };
   root.querySelector(".form").onsubmit = function (e) { e.preventDefault(); ask(input.value); };
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") toggle(false); });
+  document.addEventListener("assistant:open", function () { toggle(true); });
   document.body.appendChild(host);
 })();
