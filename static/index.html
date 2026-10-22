@@ -20,6 +20,7 @@
     --warn: #b86e00;
     --bar: #0a4a5e; --bar-text: #eafcff; --bar-muted: #a7dde9;
     --topbar-h: 52px;
+    --backbar-h: 44px;
     --side-w: 340px;
     --ui: "Segoe UI Variable Text", "Segoe UI", "Trebuchet MS", "Helvetica Neue", Arial, sans-serif;
     --display: "Trebuchet MS", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
@@ -43,17 +44,16 @@
   .tablink:hover { color: var(--text); }
   a.btnlink { display: inline-block; width: auto; margin-top: 0; padding: 9px 16px; border-radius: 6px; font-weight: 600; font-size: 13px; text-decoration: none; background: var(--accent2); color: #fff; }
   a.btnlink.alt { background: transparent; border: 1px solid var(--border); color: var(--text); }
-  .fltrow td.flt { padding: 3px 4px; text-align: left !important; white-space: nowrap; background: rgba(10,132,184,0.05); }
-  .fltrow td.flt input { width: 100%; min-width: 46px; padding: 2px 5px; font-size: 11.5px; border-radius: 4px; }
+  .fltrow td.flt { padding: 4px 5px; text-align: left !important; white-space: nowrap; background: #d3eef5; border-bottom: 2px solid #0a5a75; border-right: 1px solid #a9d5e2; }
+  .fltrow td.flt input { width: 100%; min-width: 46px; padding: 3px 6px; font-size: 11.5px; border-radius: 4px; background: #fff; border: 1px solid #8fc3d3; }
   .fltbar { font-size: 12px; color: var(--muted); margin: 0 0 4px; }
   .fltbar button { width: auto; padding: 1px 8px; font-size: 11.5px; margin: 0 0 0 8px; cursor: pointer; }
-  th .sortmark { color: var(--accent2); }
 
   /* ---- shell: sidebar + main ---- */
   .view { display: none; }
   .view.active { display: block; }
-  .layout { display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr); min-height: calc(100vh - var(--topbar-h)); }
-  .sidebar { background: var(--side); border-right: 1px solid var(--border); padding: 4px 0 28px; position: sticky; top: var(--topbar-h); align-self: start; height: calc(100vh - var(--topbar-h)); overflow-y: auto; }
+  .layout { display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr); min-height: calc(100vh - var(--topbar-h) - var(--backbar-h)); }
+  .sidebar { background: var(--side); border-right: 1px solid var(--border); padding: 4px 0 28px; position: sticky; top: calc(var(--topbar-h) + var(--backbar-h)); align-self: start; height: calc(100vh - var(--topbar-h) - var(--backbar-h)); overflow-y: auto; }
   .side-section { padding: 16px 20px; border-bottom: 1px solid var(--border); }
   .side-section:last-child { border-bottom: none; }
   .main { padding: 20px 28px 60px; min-width: 0; }
@@ -92,13 +92,21 @@
   .status.error { color: var(--danger); }
 
   /* ---- tables / output ---- */
-  table { border-collapse: collapse; width: 100%; font-size: 13px; }
-  th, td { text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-  th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
+  table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 13px; border: 2px solid #0a5a75; background: #fff; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #b9dbe5; border-right: 1px solid #d3e9ef; white-space: nowrap; }
+  th:last-child, td:last-child { border-right: 0; }
+  thead th { background: #0a5a75; color: #fff; font-weight: 700; font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase; position: sticky; top: 0; z-index: 2;
+             border-top: 4px solid #36c5e0; border-bottom: 3px solid #ffb21f; border-right: 1px solid #2f86a2; }
+  thead th:last-child { border-right: 0; }
+  thead th:hover { background: #0d6e8d; }
+  thead th .sortmark { color: #ffd166; }
   td:not(:first-child), th:not(:first-child) { text-align: right; }
-  tr:hover td { background: rgba(10,132,184,0.07); }
+  tbody tr:nth-child(even) { background: #eef9fc; }
+  tbody tr:hover td { background: #cfeff8; }
+  tbody tr:last-child td { border-bottom: 0; }
   pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; background: var(--field); padding: 12px; border-radius: 6px; border: 1px solid var(--border); max-height: 65vh; overflow: auto; }
-  .result-scroll { max-height: 65vh; overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
+  .result-scroll { max-height: 65vh; overflow: auto; border: 2px solid #0a5a75; border-radius: 8px; }
+  .result-scroll table { border: 0; }
   .empty { color: var(--muted); font-size: 13px; padding: 48px 20px; text-align: center; line-height: 1.6; }
 
   /* ---- stock input rows (sidebar) ---- */
@@ -180,7 +188,7 @@
   .result-msg.bad { border-color: var(--danger); background: rgba(239,90,90,.08); }
   .result-msg a { color: var(--accent2); }
   table.compact { font-size: 12.5px; }
-  table.compact th, table.compact td { padding: 4px 8px; text-align: left; }
+  table.compact th, table.compact td { padding: 6px 9px; text-align: left; }
   table.compact td.r, table.compact th.r { text-align: right; }
   table.compact td.lv { color: var(--muted); font-size: 12px; }
   table.compact input[type=checkbox] { width: auto; margin: 0; }
@@ -198,6 +206,12 @@
   .chart-wrap.mid { height: 220px; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 
+  /* ---- the Home bar shown at the top of every page except Home ---- */
+  .backbar { display: none; height: var(--backbar-h); align-items: center; gap: 14px; padding: 0 20px; background: rgba(255,255,255,.85); border-bottom: 1px solid var(--border); position: sticky; top: var(--topbar-h); z-index: 9; }
+  .backbar.show { display: flex; }
+  .backbar .homebtn { width: auto; margin: 0; padding: 6px 16px; border-radius: 999px; background: var(--accent2); border: 1px solid var(--accent2); color: #fff; font-weight: 700; font-size: 13px; cursor: pointer; }
+  .backbar .homebtn:hover { filter: brightness(1.08); }
+  .backbar .crumb { font-weight: 700; color: #06303f; font-family: var(--display); }
   /* ---- home: nine cards ---- */
   .home { max-width: 1080px; margin: 0 auto; padding: 34px 22px 64px; }
   .home-head { margin-bottom: 26px; }
@@ -210,8 +224,8 @@
   .card .ci { display: inline-block; width: 52px; height: 52px; line-height: 52px; text-align: center; font-size: 26px; border-radius: 14px; margin-bottom: 12px; }
   .card h3 { margin: 0 0 6px; font-size: 19px; color: #06303f; }
   .card p { margin: 0 0 14px; font-size: 13.5px; line-height: 1.5; color: var(--muted); min-height: 60px; }
-  .card .tag { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: #e1f6fb; color: #08566f; }
-  .card .go { float: right; font-weight: 700; color: var(--accent2); font-size: 13.5px; }
+  .card .go { display: block; font-weight: 700; color: var(--accent2); font-size: 14px; }
+  .cards .card:hover .go { text-decoration: underline; }
   @media (max-width: 900px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   @media (max-width: 560px) { .cards { grid-template-columns: 1fr; } .home-head h1 { font-size: 30px; } }
   @media (prefers-reduced-motion: reduce) { .cards .card { transition: none; } }
@@ -230,9 +244,9 @@
 <body>
 
 <div class="topbar">
-  <div class="brand" title="Back to the home page">TradeTheTrend<small>by EdgewithAI · S/R build 2026-10-16.12</small></div>
+  <div class="brand" title="Back to the home page">TradeTheTrend<small>by EdgewithAI · S/R build 2026-10-16.16</small></div>
   <nav class="tabs">
-    <div class="tab active" data-view="home">Home</div>
+    <div class="tab active" data-view="home" style="display:none">Home</div>
     <div class="tab" data-view="analysis">Portfolio analysis</div>
     <div class="tab" data-view="eval">Evaluation</div>
     <div class="tab" data-view="sectors">Sectors</div>
@@ -245,6 +259,8 @@
   <button type="button" class="chipbtn" id="logoutBtn" style="display:none">Log out</button>
 </div>
 
+<div class="backbar" id="backbar"><button type="button" class="homebtn" id="homeBtn" title="Back to the home page">&larr; Home</button><span class="crumb" id="crumb"></span></div>
+
 <section class="view active" id="view-home">
   <div class="home">
     <div class="home-head">
@@ -253,15 +269,15 @@
       <span class="home-note">Information only, not investment advice.</span>
     </div>
     <div class="cards">
-      <button type="button" class="card" data-go="analysis"><span class="ci" style="background:#dbeafe">&#128200;</span><h3>Portfolio Analysis</h3><p>Type in stocks and see charts, rule setups, entry, stop and target, funding and net profit or loss.</p><span class="tag">Analyse</span><span class="go">Open &rarr;</span></button>
-      <button type="button" class="card" data-go="sectors"><span class="ci" style="background:#d1f5ee">&#129517;</span><h3>Sectors</h3><p>See which sectors are gaining, with daily, weekly and monthly charts, rotation and stocks to review.</p><span class="tag">Discover</span><span class="go">Open &rarr;</span></button>
-      <button type="button" class="card" data-go="eval"><span class="ci" style="background:#ede4fb">&#128203;</span><h3>Evaluation</h3><p>Your report card: how your picks did, plus backtests of the rules on past prices.</p><span class="tag">Track</span><span class="go">Open &rarr;</span></button>
-      <button type="button" class="card" data-go="live"><span class="ci" style="background:#fff0c9">&#9889;</span><h3>Live</h3><p>Watch live prices for your stocks and today's top gainers and losers.</p><span class="tag">Watch</span><span class="go">Open &rarr;</span></button>
-      <button type="button" class="card" data-go="bhavcopy"><span class="ci" style="background:#e3e9ee">&#128193;</span><h3>Bhavcopy (EOD)</h3><p>Explore end-of-day price data and try the data tools by hand.</p><span class="tag">Data</span><span class="go">Open &rarr;</span></button>
-      <button type="button" class="card" data-go="cm"><span class="ci" style="background:#d9f0f7">&#128225;</span><h3>CM Market Data</h3><p>Explore the live market data tools and quotes directly.</p><span class="tag">Data</span><span class="go">Open &rarr;</span></button>
-      <button type="button" class="card" data-go="settings"><span class="ci" style="background:#e5ecf0">&#9881;&#65039;</span><h3>Settings</h3><p>Assistant key, funding rules, connection tests and tool discovery.</p><span class="tag">Set up</span><span class="go">Open &rarr;</span></button>
-      <button type="button" class="card" data-go="guide"><span class="ci" style="background:#dff5e4">&#128214;</span><h3>Guide / FAQ</h3><p>The illustrated guide and quick answers to common questions.</p><span class="tag">Help</span><span class="go">Open &rarr;</span></button>
-      <button type="button" class="card" data-go="assistant"><span class="ci" style="background:#fde3ec">&#128172;</span><h3>Assistant</h3><p>Ask about stocks, sectors, rotation and stocks to review in plain words.</p><span class="tag">Chat</span><span class="go">Open &rarr;</span></button>
+      <button type="button" class="card" data-go="analysis"><span class="ci" style="background:#dbeafe">&#128200;</span><h3>Portfolio Analysis</h3><p>Type in stocks and see charts, rule setups, entry, stop and target, funding and net profit or loss.</p><span class="go">Open &rarr;</span></button>
+      <button type="button" class="card" data-go="sectors"><span class="ci" style="background:#d1f5ee">&#129517;</span><h3>Sectors</h3><p>See which sectors are gaining, with daily, weekly and monthly charts, rotation and stocks to review.</p><span class="go">Open &rarr;</span></button>
+      <button type="button" class="card" data-go="eval"><span class="ci" style="background:#ede4fb">&#128203;</span><h3>Evaluation</h3><p>Your report card: how your picks did, plus backtests of the rules on past prices.</p><span class="go">Open &rarr;</span></button>
+      <button type="button" class="card" data-go="live"><span class="ci" style="background:#fff0c9">&#9889;</span><h3>Live</h3><p>Watch live prices for your stocks and today's top gainers and losers.</p><span class="go">Open &rarr;</span></button>
+      <button type="button" class="card" data-go="bhavcopy"><span class="ci" style="background:#e3e9ee">&#128193;</span><h3>Bhavcopy (EOD)</h3><p>Explore end-of-day price data and try the data tools by hand.</p><span class="go">Open &rarr;</span></button>
+      <button type="button" class="card" data-go="cm"><span class="ci" style="background:#d9f0f7">&#128225;</span><h3>CM Market Data</h3><p>Explore the live market data tools and quotes directly.</p><span class="go">Open &rarr;</span></button>
+      <button type="button" class="card" data-go="settings"><span class="ci" style="background:#e5ecf0">&#9881;&#65039;</span><h3>Settings</h3><p>Assistant key, funding rules, connection tests and tool discovery.</p><span class="go">Open &rarr;</span></button>
+      <button type="button" class="card" data-go="guide"><span class="ci" style="background:#dff5e4">&#128214;</span><h3>Guide / FAQ</h3><p>The illustrated guide and quick answers to common questions.</p><span class="go">Open &rarr;</span></button>
+      <button type="button" class="card" data-go="assistant"><span class="ci" style="background:#fde3ec">&#128172;</span><h3>Assistant</h3><p>Ask about stocks, sectors, rotation and stocks to review in plain words.</p><span class="go">Open &rarr;</span></button>
     </div>
   </div>
 </section>
@@ -287,6 +303,7 @@
 <details><summary>Why does the Assistant say it is unavailable?</summary><p>It needs an Anthropic API key with credit, set by an administrator in Settings. For sector questions, open the Sectors tab and click <b>Load sectors</b> first.</p></details>
 <details><summary>How do I filter or sort a table?</summary><p>Type in the small box under a column name. Numbers accept <b>&gt;5</b>, <b>&lt;=-2</b> and <b>3..8</b>; put a comma between choices (<b>TCS, INFY</b>); start with <b>!</b> to leave something out. Click a column name to sort and <b>Clear filters</b> to start over.</p></details>
 <details><summary>The page looks old or something is missing</summary><p>Press Ctrl+F5 to refresh fully. The build stamp next to the title and <code>/health</code> show which version the server is running. If the server was not restarted after an update, new features will not appear.</p></details>
+<details><summary>Settings says the Bhavcopy or CM server returned 404 or is not working</summary><p>The message now shows what NSE's server said. If it says <b>Session not found</b>, NSE's server did not recognise the session the app had just opened (this can happen when NSE runs several servers behind one address, or restarts one). The app now retries with a new session automatically. If it keeps failing, wait a few minutes and run <b>Test NSE connection</b> again, and try from your own computer to compare. Recently loaded data may still work from the cache for a while.</p></details>
 <details><summary>Is any of this investment advice?</summary><p>No. Everything here is information from simple rules applied to past prices. Decisions are yours; consider speaking to a SEBI-registered adviser, and never use money you cannot afford to lose.</p></details>
     </div>
   </div>
@@ -1972,14 +1989,23 @@ document.getElementById("secEvery").addEventListener("change", secSchedule);
 document.getElementById("secRotLevel").addEventListener("change", secRotation);
 document.getElementById("secCap").addEventListener("change", async () => { try { await secRank(); } catch (e) {} renderSectors(); });
 
-/* ================= Home: nine cards that open the tabs ================= */
+/* ================= Home: nine cards that open the tabs, and a Home button on every other page ================= */
+const goHome = () => document.querySelector('.tab[data-view="home"]').click();
+function updateBackbar() {
+  const a = document.querySelector(".tab.active"), v = a ? a.dataset.view : "home";
+  document.getElementById("backbar").classList.toggle("show", v !== "home");
+  document.getElementById("crumb").textContent = v === "home" ? "" : a.textContent.replace(/[^\w &()\/-]/g, "").trim();
+}
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", updateBackbar));
+document.getElementById("homeBtn").addEventListener("click", goHome);
+updateBackbar();
 document.querySelectorAll("[data-go]").forEach(c => c.addEventListener("click", () => {
   const v = c.dataset.go;
   if (v === "assistant") { document.dispatchEvent(new CustomEvent("assistant:open")); return; }
   const tab = document.querySelector('.tab[data-view="' + v + '"]');
   if (tab) tab.click();
 }));
-document.querySelector(".brand").addEventListener("click", () => document.querySelector('.tab[data-view="home"]').click());
+document.querySelector(".brand").addEventListener("click", goHome);
 const faqSearch = document.getElementById("faqSearch");
 faqSearch.addEventListener("input", () => {
   const q = faqSearch.value.trim().toLowerCase();

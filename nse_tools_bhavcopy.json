@@ -1,0 +1,498 @@
+[
+  {
+    "name": "get_top_by_volume",
+    "description": "Get the top N most actively traded NSE stocks on a specific date, sorted descending.\nSort by 'volume' (traded quantity) or 'value' (turnover in \u20b9).\nIf the exact date is a holiday/weekend, returns the nearest trading day.\n\nDisclaimer: Information/Data made available through the NSEIL MCP server is for informational and educational purposes only and does not constitute investment advice or recommendation. NSEIL is not responsible for any AI generated Output or predictions",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "description": "Date in yyyy-MM-dd format. Use today's date for current data."
+        },
+        "n": {
+          "type": "integer",
+          "description": "Number of stocks to return. Default: 10, Max: 50"
+        },
+        "sortBy": {
+          "type": "string",
+          "description": "Sort metric: 'volume' (traded quantity, default) or 'value' (turnover in \u20b9)."
+        }
+      },
+      "required": [
+        "date",
+        "n",
+        "sortBy"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_top_movers",
+    "description": "Get the top N gaining or losing NSE stocks on a specific date.\nReturns stocks sorted by % change with OHLCV details.\nIf the exact date is a holiday/weekend, returns the nearest trading day.\n\nIMPORTANT \u2014 UNADJUSTED PRICES + CORPORATE ACTION CHECK:\n% change is computed from raw unadjusted prevClose vs close. A stock with a split or bonus ex-date on the requested date will appear as a top loser with a large negative % (e.g., \u221250% for 1:1 bonus) even though no actual loss occurred. When presenting top losers: for any stock showing a drop > 20%, call get_corporate_actions(symbol, date, date) to check if the NSE CA data lists an ex-date matching that day. If matched, inform the user: e.g. \"BRIGADE shows \u221250% on 2019-07-26 \u2014 confirmed CA: Bonus 1:1 ex-date (NSE data). Not a real market loss.\" Only flag as CA if confirmed by actual NSE data.\n\nDisclaimer: Information/Data made available through the NSEIL MCP server is for informational and educational purposes only and does not constitute investment advice or recommendation. NSEIL is not responsible for any AI generated Output or predictions",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "description": "Date in yyyy-MM-dd format. Use today's date for current data."
+        },
+        "n": {
+          "type": "integer",
+          "description": "Number of stocks to return. Default: 10, Max: 50"
+        },
+        "direction": {
+          "type": "string",
+          "description": "Direction: 'gain' for top gainers, 'loss' for top losers."
+        }
+      },
+      "required": [
+        "date",
+        "n",
+        "direction"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "nse_lookup_symbol",
+    "description": "Look up NSE ticker symbols by partial name or keyword. Returns matching ticker list only \u2014 no price data.\nUse this to find the exact NSE symbol before calling other tools.\nFaster and lighter than search_symbols when you only need the ticker.\n\nExamples:\n  query=HDFC   \u2192 [HDFC, HDFCBANK, HDFCLIFE, HDFCAMC, ...]\n  query=TATA   \u2192 [TATA, TATASTEEL, TATAMOTORS, TATACOMM, ...]\n  query=BANK   \u2192 [BANKBARODA, BANKINDIA, CANBK, ...]",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Partial symbol or keyword to search. Case-insensitive. Examples: 'HDFC', 'TATA', 'RELIANCE'"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_market_mood",
+    "description": "Get a factual read of NSE market mood for a day: India VIX level, its change over 1 day / 1 week / 1 month and where it sits in its recent range; how many equity indices rose vs fell; how many mainboard stocks advanced vs declined (when available); and the day's change in the main benchmarks.\nThe 'reading' fields (broad advance / mixed / broad decline) and VIX 'direction' (rising / falling / flat) follow the fixed rules given in 'method'. They describe the day; they are not a forecast or a buy/sell signal \u2014 present them that way.\nA section is omitted when its data is not available for the date; do not fill it in.\nIf the date is a holiday/weekend, the nearest earlier trading day is used \u2014 always quote the 'date' field; if a 'warning' is present, tell the user.\nSEBI Disclaimer: This information is for educational and research purposes only. It does not constitute investment advice or a recommendation to buy, sell, or hold any securities. Past performance is not indicative of future results. Please consult a SEBI-registered investment advisor before making any investment decisions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "description": "Date in yyyy-MM-dd format. Omit or pass 'today' for the latest available day."
+        }
+      },
+      "required": [
+        "date"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_index_valuation",
+    "description": "Get the valuation ratios of an NSE equity index \u2014 P/E, P/B and dividend yield as published by NSE \u2014 and where today's value sits within its own recent range: min, max (with dates), median, mean and percentile.\npercentile = share of trading days in the window on which the ratio was lower than the current value (e.g. P/E percentile 90 means P/E was lower on 90% of days).\nThe window is the look-back requested, limited to the data available: always state window_from / window_to when quoting a percentile, and do not describe it as a long-term or historical average.\nNot available for India VIX, bond, USD, leverage or inverse indices.\nAlways quote the 'date' field as the as-of date; if a 'warning' is present, tell the user.\nSEBI Disclaimer: This information is for educational and research purposes only. It does not constitute investment advice or a recommendation to buy, sell, or hold any securities. Past performance is not indicative of future results. Please consult a SEBI-registered investment advisor before making any investment decisions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "indexName": {
+          "type": "string",
+          "description": "NSE index name, case-insensitive. Examples: Nifty 50, Nifty Bank, Nifty IT, Nifty Midcap 100"
+        },
+        "months": {
+          "type": "integer",
+          "description": "Look-back window in months. Default: 24. Max: 60. Pass 0 for default."
+        },
+        "date": {
+          "type": "string",
+          "description": "As-of date in yyyy-MM-dd format. Omit or pass 'today' for the latest available day."
+        }
+      },
+      "required": [
+        "indexName",
+        "months",
+        "date"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_market_breadth",
+    "description": "Get overall NSE market breadth for a trading date.\nReturns: total stocks, advances, declines, unchanged count, A/D ratio, total market volume.\nA/D ratio > 1.5 indicates a bullish day; A/D ratio < 0.7 indicates a bearish day.\n\nDisclaimer: Information/Data made available through the NSEIL MCP server is for informational and educational purposes only and does not constitute investment advice or recommendation. NSEIL is not responsible for any AI generated Output or predictions",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "description": "Date in yyyy-MM-dd format. Returns nearest trading day if holiday."
+        }
+      },
+      "required": [
+        "date"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_corporate_actions",
+    "description": "Fetch actual NSE corporate action events for a stock directly from NSE India.\nReturns splits, bonus issues, dividends, and other events with exact ex-dates.\nOnly events with an ex-date inside the requested from/to range are returned. If the response has an 'error', the lookup failed \u2014 do not treat that as \"no corporate actions\". If it has a 'warning', the list is incomplete.\nALWAYS call this before get_stock_history or get_price_performance when the user asks about historical prices, returns, or performance for any symbol. Use the returned exDate values to cross-check price discontinuities in the history. The adjustmentFactor field tells you how to interpret pre-event prices:   1:1 bonus \u2192 adjustmentFactor=0.5 (pre-bonus prices are 2\u00d7 the post-bonus equivalent)   10\u21922 split \u2192 adjustmentFactor=0.2 (pre-split prices are 5\u00d7 the post-split equivalent)\nReturns: list of CA events with exDate, purpose (raw NSE text), actionType (SPLIT/BONUS/DIVIDEND/OTHER), adjustmentFactor.\nSEBI Disclaimer: This information is for educational and research purposes only. It does not constitute investment advice. Please consult a SEBI-registered investment advisor before making any investment decisions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "description": "NSE stock symbol in uppercase. Example: INFY, BRIGADE, RELIANCE"
+        },
+        "fromDate": {
+          "type": "string",
+          "description": "Start date yyyy-MM-dd. Default: 5 years ago."
+        },
+        "toDate": {
+          "type": "string",
+          "description": "End date yyyy-MM-dd. Default: today."
+        }
+      },
+      "required": [
+        "symbol",
+        "fromDate",
+        "toDate"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "compare_indices",
+    "description": "Compare 2 to 10 NSE indices side by side over the same period: return, annualised volatility, maximum drawdown and current valuation (P/E, P/B, dividend yield). Ranked best to worst by return. Example: Nifty 50 vs Nifty Midcap 100 vs NIFTY Smallcap 100.\nEvery index is measured between the same base_date and date, both returned. An index with no value on either date is not ranked \u2014 it is listed under not_compared with the reason; say so rather than estimating it.\nReturns are price-only (dividends excluded) and not annualised. Valuation fields are absent for indices NSE publishes no ratios for.\nAlways quote 'date' and 'base_date'; if a 'warning' is present, tell the user.\nSEBI Disclaimer: This information is for educational and research purposes only. It does not constitute investment advice or a recommendation to buy, sell, or hold any securities. Past performance is not indicative of future results. Please consult a SEBI-registered investment advisor before making any investment decisions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "indexNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "List of 2 to 10 NSE index names, case-insensitive. Example: [\"Nifty 50\", \"Nifty Midcap 100\", \"NIFTY Smallcap 100\"]"
+        },
+        "months": {
+          "type": "integer",
+          "description": "Number of months to compare. 1\u201324. Default: 6. Pass 0 for default."
+        },
+        "date": {
+          "type": "string",
+          "description": "End date in yyyy-MM-dd format. Omit or pass 'today' for the latest available day."
+        }
+      },
+      "required": [
+        "indexNames",
+        "months",
+        "date"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_index_movers",
+    "description": "Get the top gaining and top losing NSE indices for a day or a period \u2014 useful for sector and theme rotation. Returns both lists in one call.\nperiod: 1D (default), 1W, 1M, 3M, 6M or 1Y. 1D uses NSE's published daily change; longer periods are close-to-close price change from base_date to date, both returned.\nscope: 'equity' (default) ranks equity indices only; 'all' also includes India VIX, G-Sec/bond, USD, leverage, inverse and futures indices, which are not comparable with equity indices.\nIndices that did not exist on base_date are left out and counted in indices_excluded.\nIf the date is a holiday/weekend, the nearest earlier trading day is used \u2014 always quote the 'date' field; if a 'warning' is present, tell the user.\nSEBI Disclaimer: This information is for educational and research purposes only. It does not constitute investment advice or a recommendation to buy, sell, or hold any securities. Past performance is not indicative of future results. Please consult a SEBI-registered investment advisor before making any investment decisions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "description": "Date in yyyy-MM-dd format. Omit or pass 'today' for the latest available day."
+        },
+        "period": {
+          "type": "string",
+          "description": "Period: 1D (default), 1W, 1M, 3M, 6M or 1Y."
+        },
+        "n": {
+          "type": "integer",
+          "description": "Number of gainers and of losers to return. Default: 10, Max: 50. Pass 0 for default."
+        },
+        "scope": {
+          "type": "string",
+          "description": "'equity' (default) for equity indices only, or 'all' for every index in the NSE file."
+        }
+      },
+      "required": [
+        "date",
+        "period",
+        "n",
+        "scope"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_ltp_by_date",
+    "description": "Returns the last traded price (close price) for a given NSE symbol on a specific date.\nIf the date is a non-trading day, returns the previous available trading day's price.\n\nDisclaimer: Information/Data made available through the NSEIL MCP server is for informational and educational purposes only and does not constitute investment advice or recommendation. NSEIL is not responsible for any AI generated Output or predictions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "description": "NSE stock symbol in uppercase. Example: RELIANCE"
+        },
+        "date": {
+          "type": "string",
+          "description": "Date in yyyy-MM-dd format."
+        }
+      },
+      "required": [
+        "symbol",
+        "date"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_bulk_quote",
+    "description": "Get the latest available price snapshot for multiple NSE stocks in one call.\nReturns: open, high, low, close, prev close, % change, volume, and date for each symbol.\n\nDisclaimer: Information/Data made available through the NSEIL MCP server is for informational and educational purposes only and does not constitute investment advice or recommendation. NSEIL is not responsible for any AI generated Output or predictions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "symbols": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "List of NSE symbols. Example: [\"RELIANCE\", \"TCS\", \"INFY\", \"HDFCBANK\"]. Max 50."
+        }
+      },
+      "required": [
+        "symbols"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_volume_analysis",
+    "description": "Analyse trading volume trends for an NSE stock over N trading days.\nReturns: average volume, max/min volume, volume spike days (>2\u00d7 avg), 5-day recent trend.\n\nDisclaimer: Information/Data made available through the NSEIL MCP server is for informational and educational purposes only and does not constitute investment advice or recommendation. NSEIL is not responsible for any AI generated Output or predictions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "description": "NSE stock symbol in uppercase. Example: RELIANCE, ICICIBANK"
+        },
+        "days": {
+          "type": "integer",
+          "description": "Number of trading days to analyse. Min: 5, Max: 252. Default: 30"
+        }
+      },
+      "required": [
+        "symbol",
+        "days"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_stock_history",
+    "description": "Get daily OHLCV (Open, High, Low, Close, Volume) price history for an NSE stock.\nReturns up to 3 months per call to keep response size manageable.\nFor longer periods, chain calls using next_end_date from each response.\n\nExample \u2014 fetch 1 year of RELIANCE:\n  Call 1: symbol=RELIANCE, months=3  (end_date omitted \u2192 uses today)\n  Call 2: symbol=RELIANCE, months=3, end_date={next_end_date from call 1}\n  Call 3: symbol=RELIANCE, months=3, end_date={next_end_date from call 2}\n  Call 4: symbol=RELIANCE, months=3, end_date={next_end_date from call 3}\n\nFor 2 years: repeat 8 times. Each call returns next_end_date for the next chunk.\nIf symbol not found, use search_symbols to find the correct symbol.\n\nIMPORTANT \u2014 UNADJUSTED PRICES:\nAll prices are raw NSE bhavcopy data with NO corporate action adjustment.\nBefore presenting history results, call get_corporate_actions(symbol) to get actual NSE-sourced CA events. Cross-check returned ex-dates with any single-day drop > 20% in the price series. If matched, inform the user: e.g. \"Note: INFY shows a -50% drop on 2018-06-14 which is the 1:1 bonus issue ex-date (NSE data) \u2014 prices before that date are unadjusted. Adjustment factor: 0.5.\"\n\nDisclaimer: Information/Data made available through the NSEIL MCP server is for informational and educational purposes only and does not constitute investment advice or recommendation. NSEIL is not responsible for any AI generated Output or predictions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "description": "NSE stock symbol in uppercase. Examples: RELIANCE, TCS, INFY, HDFCBANK, WIPRO"
+        },
+        "months": {
+          "type": "integer",
+          "description": "Months to fetch in this chunk. Max 3. Default: 3. Pass 0 for default."
+        },
+        "endDate": {
+          "type": "string",
+          "description": "End date for this chunk in yyyy-MM-dd format. Omit or pass 'today' for latest data. Pass next_end_date from a previous response to fetch older chunks."
+        }
+      },
+      "required": [
+        "symbol",
+        "months",
+        "endDate"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_index_snapshot",
+    "description": "Get the end-of-day values of NSE indices on a specific date: open, high, low, close, points change, % change, volume, turnover (\u20b9 Cr), P/E, P/B and dividend yield.\nReturns all ~170 indices by default, in NSE's published order (broad market first). Pass a filter to narrow by name, e.g. 'bank', 'midcap', 'nifty 50'.\nIf the exact date is a holiday/weekend, returns the nearest earlier trading day \u2014 check the 'date' field in the response.\nUse this to list valid index names for get_index_history.\nSEBI Disclaimer: This information is for educational and research purposes only. It does not constitute investment advice or a recommendation to buy, sell, or hold any securities. Past performance is not indicative of future results. Please consult a SEBI-registered investment advisor before making any investment decisions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "description": "Date in yyyy-MM-dd format. Omit or pass 'today' for the latest available day."
+        },
+        "filter": {
+          "type": "string",
+          "description": "Optional case-insensitive substring to match against index names. Omit or pass empty for all indices."
+        }
+      },
+      "required": [
+        "date",
+        "filter"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "search_symbols",
+    "description": "Search for NSE stock symbols by company name or partial symbol.\nReturns matching symbols with latest close price and % change.\nUse this when you do not know the exact NSE symbol for a company.\n\nDisclaimer: Information/Data made available through the NSEIL MCP server is for informational and educational purposes only and does not constitute investment advice or recommendation. NSEIL is not responsible for any AI generated Output or predictions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Search query \u2014 company name, partial symbol, or keyword. Examples: 'TATA', 'HDFC', 'BANK'"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_stock_vs_index",
+    "description": "Compare one NSE stock against a benchmark index over a period: return of each, outperformance in percentage points, beta and correlation.\nThe stock's return is already adjusted for splits and bonus issues using NSE corporate-action data \u2014 do not adjust it again. Events applied are listed under corporate_actions_applied. If that data cannot be obtained, or does not match the price move, the tool returns an error and no figures: report the error, do not substitute numbers from other tools.\nIf 'warnings' or 'other_corporate_actions' are present (e.g. a demerger or rights issue, which is NOT adjusted for), state them alongside the figures.\nBoth returns are price-only between the same base_date and date; dividends excluded. Beta and correlation use daily changes and need at least 30 common trading days.\nAlways quote 'date' and 'base_date'; if a 'warning' is present, tell the user.\nSEBI Disclaimer: This information is for educational and research purposes only. It does not constitute investment advice or a recommendation to buy, sell, or hold any securities. Past performance is not indicative of future results. Please consult a SEBI-registered investment advisor before making any investment decisions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "description": "NSE stock symbol. Examples: RELIANCE, TCS, HDFCBANK"
+        },
+        "indexName": {
+          "type": "string",
+          "description": "Benchmark NSE index name, case-insensitive. Default: Nifty 50. Examples: Nifty 50, Nifty Bank, Nifty IT, Nifty 500"
+        },
+        "months": {
+          "type": "integer",
+          "description": "Number of months. 1\u201324. Default: 12. Pass 0 for default."
+        },
+        "date": {
+          "type": "string",
+          "description": "End date in yyyy-MM-dd format. Omit or pass 'today' for the latest available day."
+        }
+      },
+      "required": [
+        "symbol",
+        "indexName",
+        "months",
+        "date"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "compare_stocks",
+    "description": "Compare multiple NSE stocks side-by-side over a time period.\nReturns % return for each stock ranked best to worst, plus max drawdown per stock.\nPass up to 10 valid NSE symbols.\n\nIMPORTANT \u2014 UNADJUSTED PRICES + CORPORATE ACTION CHECK:\nPrices are raw NSE bhavcopy data with NO corporate action adjustment. A split or bonus issue within the comparison window distorts return_pct severely (e.g., 1:1 bonus in the period makes return appear \u221250% lower than reality). Before presenting results: call get_corporate_actions(symbol, fromDate, toDate) for each symbol in the list. If any CA ex-date falls within the comparison window, flag it clearly: e.g. \"INFY return_pct is distorted \u2014 1:1 bonus ex-date 2018-06-14 falls in window (NSE data). Adjustment factor: 0.5. Actual return may differ.\"\n\nDisclaimer: Information/Data made available through the NSEIL MCP server is for informational and educational purposes only and does not constitute investment advice or recommendation. NSEIL is not responsible for any AI generated Output or predictions",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "symbols": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "List of NSE symbols to compare. Example: [\"TCS\", \"INFY\", \"WIPRO\"]. Max 10."
+        },
+        "months": {
+          "type": "integer",
+          "description": "Number of months to compare. 1\u201324. Default: 6"
+        }
+      },
+      "required": [
+        "symbols",
+        "months"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_index_history",
+    "description": "Get daily history for an NSE index: open, high, low, close, points change, % change, volume, turnover (\u20b9 Cr), P/E, P/B and dividend yield.\nReturns up to 12 months per call. For longer periods, chain calls using next_end_date from each response.\nIndex names are the official NSE names, case-insensitive. Examples: Nifty 50, Nifty Bank, Nifty Next 50, Nifty IT, Nifty Midcap 100, NIFTY Smallcap 100, India VIX.\nIf the index is not found, the response lists close matches; get_index_snapshot returns every available name.\nSome fields are omitted where NSE does not publish them (e.g. no volume / P/E / P/B / dividend yield for bond, USD and strategy indices; no open/high/low for rate indices).\nSEBI Disclaimer: This information is for educational and research purposes only. It does not constitute investment advice or a recommendation to buy, sell, or hold any securities. Past performance is not indicative of future results. Please consult a SEBI-registered investment advisor before making any investment decisions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "indexName": {
+          "type": "string",
+          "description": "NSE index name, case-insensitive. Examples: Nifty 50, Nifty Bank, Nifty IT, India VIX"
+        },
+        "months": {
+          "type": "integer",
+          "description": "Months to fetch in this chunk. Max 12. Default: 3. Pass 0 for default."
+        },
+        "endDate": {
+          "type": "string",
+          "description": "End date for this chunk in yyyy-MM-dd format. Omit or pass 'today' for latest data. Pass next_end_date from a previous response to fetch older chunks."
+        }
+      },
+      "required": [
+        "indexName",
+        "months",
+        "endDate"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "moving_average",
+    "description": "Calculates the simple moving average (SMA) of close prices for a stock over the last N trading days.\nCommon periods: 20-day (short-term), 50-day (medium-term), 200-day (long-term).\n\nDisclaimer: Information/Data made available through the NSEIL MCP server is for informational and educational purposes only and does not constitute investment advice or recommendation. NSEIL is not responsible for any AI generated Output or predictions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "description": "NSE stock symbol in uppercase. Example: HINDALCO"
+        },
+        "days": {
+          "type": "integer",
+          "description": "Number of trading days. Common values: 20, 50, 100, 200"
+        }
+      },
+      "required": [
+        "symbol",
+        "days"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_52_week_high_low",
+    "description": "Get the 52-week high and low prices for an NSE stock.\nReturns: 52w high/low with dates, current price position within range, % distance from each extreme.\n\nIMPORTANT \u2014 UNADJUSTED PRICES + CORPORATE ACTION CHECK:\nHigh/low values are from raw unadjusted bhavcopy data. A split or bonus ex-date within the 52-week window causes an artificial low (the post-event price is a fraction of the pre-event price), which distorts the true 52-week range. Before presenting results: call get_corporate_actions(symbol) (covers last 5 years). Check if any CA ex-date falls within the past 52 weeks (today \u2212 365 days). If yes, flag: e.g. \"52W low for INFY may be distorted \u2014 1:1 bonus ex-date 2024-06-14 falls in range (NSE data). The post-bonus price level is not comparable to pre-bonus prices.\"\n\nDisclaimer: Information/Data made available through the NSEIL MCP server is for informational and educational purposes only and does not constitute investment advice or recommendation. NSEIL is not responsible for any AI generated Output or predictions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "description": "NSE stock symbol in uppercase. Example: RELIANCE, TCS, INFY"
+        }
+      },
+      "required": [
+        "symbol"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_index_performance",
+    "description": "Get the price performance of one NSE index: 1-day change plus returns over 1 week, 1 month, 3 months, 6 months, 1 year and 2 years, and the 52-week high/low with dates and distance from each.\nEach period return is the close-to-close price change against the last trading day on or before the period start; the response gives that base_date and base_close so the figure can be checked. Returns are not annualised and exclude dividends.\nPeriods the index has no data for are listed under unavailable_periods \u2014 do not estimate them. If high_low_52w.complete_52_weeks is false, the high/low cover only the shorter window shown.\nAlways quote the 'date' field as the as-of date; if a 'warning' is present, tell the user.\nSEBI Disclaimer: This information is for educational and research purposes only. It does not constitute investment advice or a recommendation to buy, sell, or hold any securities. Past performance is not indicative of future results. Please consult a SEBI-registered investment advisor before making any investment decisions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "indexName": {
+          "type": "string",
+          "description": "NSE index name, case-insensitive. Examples: Nifty 50, Nifty Bank, Nifty IT, Nifty Midcap 100"
+        },
+        "date": {
+          "type": "string",
+          "description": "As-of date in yyyy-MM-dd format. Omit or pass 'today' for the latest available day."
+        }
+      },
+      "required": [
+        "indexName",
+        "date"
+      ],
+      "additionalProperties": false
+    }
+  }
+]

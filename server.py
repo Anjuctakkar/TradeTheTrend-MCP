@@ -65,7 +65,7 @@ def health():
     except Exception as exc:  # noqa: BLE001
         print(f"[health] database check failed: {type(exc).__name__}: {exc}", flush=True)
         raise HTTPException(503, "database unavailable")
-    return {"ok": True, "build": "sr-2026-10-16.12"}
+    return {"ok": True, "build": "sr-2026-10-16.16"}
 
 SERVERS: dict[str, str] = {
     "bhavcopy": os.getenv("NSE_BHAV_URL", "https://mcp.nseindia.in/bhavcopy/cm/mcp"),
@@ -84,7 +84,7 @@ ANALYSIS_HISTORY_MONTHS = 12  # also gives the 52-week range and enough trades t
 ANALYSIS_CONCURRENCY = 3
 # Network behaviour towards the NSE MCP servers (override with environment variables / .env).
 NSE_READ_TIMEOUT = float(os.getenv("NSE_READ_TIMEOUT", "60"))   # seconds to wait for a reply
-NSE_RETRIES = int(os.getenv("NSE_RETRIES", "1"))                # extra attempts after a timeout or 502/503/504
+NSE_RETRIES = int(os.getenv("NSE_RETRIES", "4"))                # extra attempts (each with a fresh session) after a timeout, 404 session-not-found or 502/503/504
 NSE_MAX_INFLIGHT = int(os.getenv("NSE_MAX_INFLIGHT", "4"))      # simultaneous requests to NSE across the whole app
 NSE_ATTEMPTS = max(NSE_RETRIES, 1) + 1                           # always at least one retry (covers an expired session)
 
@@ -145,6 +145,32 @@ def _describe_error(exc: BaseException) -> str:
         elif isinstance(e, httpx.TimeoutException):
             parts.append(f"{type(e).__name__}: NSE did not reply within {NSE_READ_TIMEOUT:.0f}s "
                          f"(tried {NSE_ATTEMPTS} times). NSE's servers are slow or down right now; try again shortly")
+        elif isinstance(e, httpx.HTTPStatusError):
+            r = e.response
+            msg = ""
+            try:
+                d = json.loads(r.text)
+                msg = str(d.get("message") or d.get("localizedMessage") or d.get("error") or "") if isinstance(d, dict) else ""
+            except ValueError:
+                pass
+            if not msg:
+                msg = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", r.text or "")).strip()
+            step = ""
+            try:
+                req = json.loads(e.request.content)
+                step = f" while calling {req.get('method')}" + ("" if e.request.headers.get("mcp-session-id") else " (no session id sent)")
+            except Exception:  # noqa: BLE001 - the extra detail is optional
+                pass
+            if "session" in msg.lower():
+                hint = (" NSE's server did not recognise the session the app had just opened (this can happen when NSE runs several servers behind one address, "
+                        "or restarts one). The app retries with a new session automatically; if it keeps failing, wait a few minutes and test again.")
+            elif r.status_code in (403, 404):
+                hint = " NSE's server rejected the request. The addresses are NSE's published ones. Try again shortly, and compare with running the app on your own computer."
+            elif r.status_code >= 500:
+                hint = " NSE's server is having trouble; try again shortly."
+            else:
+                hint = ""
+            parts.append(f"HTTP {r.status_code} from {r.url.host}{r.url.path}{step}: {msg[:200] or 'no message'}" + (f" [via {r.headers.get('server')}]" if r.headers.get("server") else "") + "." + hint)
         elif isinstance(e, httpx.ConnectError):
             parts.append(f"ConnectError: couldn't connect to NSE ({e}). Check your internet connection or proxy")
         else:
@@ -192,6 +218,7 @@ async def _post(url: str, method: str, params: dict[str, Any], session_id: Optio
     headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
     if session_id:
         headers["Mcp-Session-Id"] = session_id
+        headers["MCP-Protocol-Version"] = _INIT_PARAMS["protocolVersion"]
     payload: dict[str, Any] = {"jsonrpc": "2.0", "method": method, "params": params}
     if expect_response:
         payload["id"] = next(_ID_COUNTER)
@@ -228,7 +255,11 @@ async def _ensure_session(url: str, force: bool = False) -> Optional[str]:
         if url in _sessions and not force:
             return _sessions[url]
         _, sid = await _post(url, "initialize", _INIT_PARAMS, None)
-        await _post(url, "notifications/initialized", {}, sid, expect_response=False)
+        try:
+            await _post(url, "notifications/initialized", {}, sid, expect_response=False)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in (400, 404):      # an unknown session can show up here; the next call decides
+                raise
         _sessions[url] = sid
         return sid
 
@@ -241,18 +272,18 @@ async def _rpc(url: str, method: str, params: dict[str, Any]) -> dict[str, Any]:
     session the server no longer knows (400/401/404) triggers a fresh handshake and another attempt."""
     attempts = NSE_ATTEMPTS
     for attempt in range(attempts):
-        sid = await _ensure_session(url)
         try:
+            sid = await _ensure_session(url)       # the handshake is retried too, not only the call
             result, _ = await _post(url, method, params, sid)
             return result or {}
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code not in (400, 401, 404, 502, 503, 504) or attempt == attempts - 1:
                 raise
-        except _RETRYABLE:
-            if attempt == attempts - 1:
+        except _RETRYABLE as exc:
+            if attempt == attempts - 1 or (isinstance(exc, httpx.TimeoutException) and attempt >= 1):    # timeouts are slow: only one retry
                 raise
         _sessions.pop(url, None)               # force a new handshake next time
-        await asyncio.sleep(1.5 * (attempt + 1))
+        await asyncio.sleep(min(1.5 * (attempt + 1), 3.0))
     raise RuntimeError("unreachable")
 
 
