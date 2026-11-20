@@ -80,11 +80,12 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "suggest_stocks",
-        "description": "Scan the 30 most-traded NSE stocks for rule-based LONG setups and return up to 5, ranked by rule score and low correlation with the user's holdings, with the budget split equally. Quantities use the current market price, and setups already below their stop or above their target at that price are skipped (listed in skipped_by_price). Slow (about a minute).",
+        "description": "Scan at least 250 of the most-traded cash-market NSE stocks (Bhavcopy top by traded value, topped up from the sector lists) for rule-based LONG setups and return up to 5, ranked by rule score and low correlation with the user's holdings, with the budget split equally. Quantities use the current market price, and setups already below their stop or above their target at that price are skipped (listed in skipped_by_price). Slow the first time: the wide scan can take several minutes. If it is still running the tool says so (ask again in a minute); a finished scan is reused for 15 minutes.",
         "input_schema": {"type": "object", "properties": {
             "budget": {"type": "number", "description": "Rupees to deploy."},
             "holdings": {"type": "array", "items": {"type": "string"}, "description": "NSE symbols the user already holds (optional, max 10)."},
-            "model": {"type": "string", "enum": ["trend", "sr", "either"], "description": "Which rule set may produce picks: trend (default), sr (support/resistance) or either."}},
+            "model": {"type": "string", "enum": ["trend", "sr", "either"], "description": "Which rule set may produce picks: trend (default), sr (support/resistance) or either."},
+            "scan_size": {"type": "integer", "enum": [30, 250], "description": "How many of the most-traded stocks to scan: 250 (default, wider, slower the first time) or 30 (faster)."}},
             "required": ["budget"]},
     },
     {

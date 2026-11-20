@@ -244,7 +244,7 @@
 <body>
 
 <div class="topbar">
-  <div class="brand" title="Back to the home page">TradeTheTrend<small>by EdgewithAI · S/R build 2026-10-16.16</small></div>
+  <div class="brand" title="Back to the home page">TradeTheTrend<small>by EdgewithAI · S/R build 2026-10-16.18</small></div>
   <nav class="tabs">
     <div class="tab active" data-view="home" style="display:none">Home</div>
     <div class="tab" data-view="analysis">Portfolio analysis</div>
@@ -883,6 +883,21 @@ analyzeBtn.addEventListener("click", async () => {
 
 
 /* ---------- Suggestions (recommend.py) ---------- */
+/** Starts a suggestion run on the server and polls it (the wide scan takes minutes, too long for one request). */
+async function recRun(body, st) {
+  const start = await fetch("/api/recommend/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const s = await start.json().catch(() => ({}));
+  if (!start.ok) throw new Error(typeof s.detail === "string" ? s.detail : start.statusText);
+  for (;;) {
+    await new Promise(r => setTimeout(r, 2000));
+    const res = await fetch("/api/recommend/status?job=" + encodeURIComponent(s.job)), d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(typeof d.detail === "string" ? d.detail : res.statusText);
+    if (d.state === "done") return d.result;
+    if (d.state === "error") throw new Error(d.error || "The scan failed.");
+    const p = d.progress || {};
+    st.textContent = p.total ? `Scanning ${p.done || 0} of ${p.total} stocks…` + (p.done >= p.total ? " finishing up" : "") : "Starting the scan…";
+  }
+}
 function renderRecommendPanel() {
   const ok = (window.lastResults || []).filter(r => !r.error);
   document.getElementById("recPanel")?.remove();
@@ -894,8 +909,11 @@ function renderRecommendPanel() {
     <input type="number" class="recBudget" min="0" value="100000" />
     <label>Rule set</label>
     <select class="recModel"><option value="trend">Trend and momentum</option><option value="sr">Support and resistance</option><option value="either">Either</option></select>
+    <label>Stocks to scan</label>
+    <label style="display:flex;align-items:center;gap:7px;margin:4px 0;color:var(--text);font-size:13px"><input type="radio" name="recSize" value="250" checked style="width:auto;margin:0"> 250 most traded <span class="hint" style="margin:0">(wider, a few minutes the first time)</span></label>
+    <label style="display:flex;align-items:center;gap:7px;margin:4px 0;color:var(--text);font-size:13px"><input type="radio" name="recSize" value="30" style="width:auto;margin:0"> 30 most traded <span class="hint" style="margin:0">(faster)</span></label>
     <div class="hint">${ok.length ? `Using your ${ok.length} analysed stock(s) to avoid overlap.` : "No analysed holdings yet, so correlation with your portfolio is skipped. Run an analysis first for a better ranking."}</div>
-    <div class="hint">Scans the 30 most-traded NSE names for LONG setups, ranks by rule score and low correlation with your holdings. Mechanical screen only, not advice.</div>
+    <div class="hint">Scans the 250 or the 30 most-traded cash-market stocks you choose (end-of-day history from the Bhavcopy server, current price from the CM live feed) for LONG setups, ranks by rule score and low correlation with your holdings. The first scan takes a few minutes; a finished scan is shared and reused for 15 minutes. Mechanical screen only, not advice.</div>
     <button class="primary recBtn">Suggest stocks</button>
     <div class="status recStatus"></div>`;
   document.getElementById("recSlot").appendChild(panel);
@@ -903,21 +921,19 @@ function renderRecommendPanel() {
   recResults.innerHTML = "";
   const btn = panel.querySelector(".recBtn"), st = panel.querySelector(".recStatus"), out = recResults;
   btn.addEventListener("click", async () => {
-    btn.disabled = true; st.className = "status recStatus"; st.textContent = "Scanning… this can take a minute."; out.innerHTML = "";
+    btn.disabled = true; st.className = "status recStatus"; st.textContent = "Starting the scan…"; out.innerHTML = "";
     try {
       const existing = ok.map(r => ({ symbol: r.symbol, dates: r.dates, close: r.close }));
-      const res = await fetch("/api/recommend", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ budget: parseFloat(panel.querySelector(".recBudget").value) || 0, existing, model: panel.querySelector(".recModel").value }) });
-      const d = await res.json();
-      if (!res.ok) throw new Error(d.detail || res.statusText);
-      st.textContent = `Scanned ${d.scanned}, ${d.longs_found} long setup(s).` + (d.note ? " " + d.note : "");
+      const d = await recRun({ budget: parseFloat(panel.querySelector(".recBudget").value) || 0, existing, model: panel.querySelector(".recModel").value, scan_size: +panel.querySelector('input[name="recSize"]:checked').value }, st);
+      const u = d.universe || {};
+      st.textContent = `Scanned ${d.scanned} stocks (${u.top_by_value ?? 0} top by traded value${u.from_sector_lists ? ", " + u.from_sector_lists + " from the sector lists" : ""})${d.failed ? ", " + d.failed + " could not be loaded" : ""}: ${d.longs_found} long setup(s).` + (d.note ? " " + d.note : "") + (u.note ? " " + u.note : "");
       let savedIds = [];
       if ((d.skipped_by_price || []).length) st.textContent += " Skipped because the price has already moved: " + d.skipped_by_price.map(x => `${x.symbol} (${x.reason})`).join(", ") + ".";
       if (d.picks.length) {
         await evalReady;
         savedIds = evalStore.add(d.picks.map(p => ({ symbol: p.symbol, as_of: String(p.as_of).slice(0, 10), entry: p.entry, stop_loss: p.stop_loss, target: p.target, score: p.score, hold_days: p.hold_days ?? null, model: p.model, setup: p.setup })), "system").ids;
       }
-      if (d.picks.length) out.innerHTML = `<div class="panel"><h2>Suggested additions</h2><div class="result-scroll"><table><thead><tr><th>Symbol</th><th>Rule set</th><th>Score</th><th>RSI</th><th>Corr. to portfolio</th><th>Entry</th><th>CMP</th><th>Stop</th><th>Target</th><th>Hold</th><th>52w low</th><th>52w high</th><th>Qty</th><th>Invested</th></tr></thead><tbody>${d.picks.map(p => `<tr><td>${escapeHtml(p.symbol)}</td><td>${modelBadge(p)}</td><td>${p.score}</td><td>${p.rsi}</td><td>${p.correlation ?? "—"}</td><td>₹${p.entry}</td><td>${p.cmp != null ? "₹" + p.cmp + (p.cmp_source === "live" ? ' <span class="badge target">live</span>' : p.cmp_source === "eod" ? ' <span class="badge expired" title="Live price unavailable">EOD</span>' : "") : "—"}</td><td>₹${p.stop_loss}</td><td>₹${p.target}</td><td>${holdShort(p.hold)}</td><td>${p.week52?.status === "ok" ? fmtMoney(p.week52.low) : "—"}</td><td>${p.week52?.status === "ok" ? fmtMoney(p.week52.high) : "—"}</td><td>${p.quantity}</td><td>₹${p.invested.toLocaleString("en-IN")}</td></tr>`).join("")}</tbody></table></div><details class="trades"><summary>Why these holding periods</summary>${d.picks.map(p => `<div style="margin:8px 0"><b>${escapeHtml(p.symbol)}</b>: ${p.hold?.status === "proposed" ? "about " + p.hold.days + " trading days" : "none proposed"}<ul class="signal-reasons">${(p.hold?.reasoning || []).map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul></div>`).join("")}</details><button class="linkish btPicks" style="width:auto;padding:8px 14px">Backtest these picks</button><div class="hint">Quantity and invested use the current market price (CMP), and setups already past their stop or target at that price are skipped. These are saved to your Evaluation list as System picks, on this computer and not on the server, so you can check how they play out.</div></div>`;
+      if (d.picks.length) out.innerHTML = `<div class="panel"><h2>Suggested additions</h2><div class="result-scroll"><table><thead><tr><th>Symbol</th><th>Rule set</th><th>Score</th><th>RSI</th><th>Corr. to portfolio</th><th>Entry</th><th>CMP</th><th>Today</th><th>Stop</th><th>Target</th><th>Hold</th><th>52w low</th><th>52w high</th><th>Qty</th><th>Invested</th></tr></thead><tbody>${d.picks.map(p => `<tr><td>${escapeHtml(p.symbol)}</td><td>${modelBadge(p)}</td><td>${p.score}</td><td>${p.rsi}</td><td>${p.correlation ?? "—"}</td><td>₹${p.entry}</td><td>${p.cmp != null ? "₹" + p.cmp + (p.cmp_source === "live" ? ' <span class="badge target">live</span>' : p.cmp_source === "eod" ? ' <span class="badge expired" title="Live price unavailable">EOD</span>' : "") : "—"}</td><td>${p.cmp_change_pct != null ? pct(p.cmp_change_pct) : "—"}</td><td>₹${p.stop_loss}</td><td>₹${p.target}</td><td>${holdShort(p.hold)}</td><td>${p.week52?.status === "ok" ? fmtMoney(p.week52.low) : "—"}</td><td>${p.week52?.status === "ok" ? fmtMoney(p.week52.high) : "—"}</td><td>${p.quantity}</td><td>₹${p.invested.toLocaleString("en-IN")}</td></tr>`).join("")}</tbody></table></div><details class="trades"><summary>Why these holding periods</summary>${d.picks.map(p => `<div style="margin:8px 0"><b>${escapeHtml(p.symbol)}</b>: ${p.hold?.status === "proposed" ? "about " + p.hold.days + " trading days" : "none proposed"}<ul class="signal-reasons">${(p.hold?.reasoning || []).map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul></div>`).join("")}</details><button class="linkish btPicks" style="width:auto;padding:8px 14px">Backtest these picks</button><div class="hint">Quantity and invested use the current market price (CMP), and setups already past their stop or target at that price are skipped. These are saved to your Evaluation list as System picks, on this computer and not on the server, so you can check how they play out.</div></div>`;
       out.querySelector(".btPicks")?.addEventListener("click", () => {
         evalSelected.clear();
         savedIds.forEach(id => evalSelected.add(id));

@@ -71,7 +71,8 @@ async def backtest_stock(symbol: str, months: int = 12, max_hold_days: int = 20,
             "caveat": "Backtest uses the same stock selection hindsight; few trades prove little."}
 
 
-async def suggest_stocks(budget: float, holdings: Optional[list[str]] = None, model: str = "trend") -> dict[str, Any]:
+async def suggest_stocks(budget: float, holdings: Optional[list[str]] = None, model: str = "trend", scan_size: int = 250) -> dict[str, Any]:
+    scan_size = recommend.size_choice(scan_size)
     model = model if model in recommend.MODELS else "trend"
     url = _url()
     syms = list(dict.fromkeys(_sym(s) for s in (holdings or [])))[:10]
@@ -82,10 +83,14 @@ async def suggest_stocks(budget: float, holdings: Optional[list[str]] = None, mo
                 "close": [core._to_float(r.get("close")) for r in recs]}
 
     existing = list(await asyncio.gather(*(hist(s) for s in syms))) if syms else []
-    # Not logged: on a public site the track-record file would mix every visitor's picks.
-    async with core.heavy_slot():       # shared with the dashboard's scan: a few at a time across all users
-        return await recommend.recommend(url, existing, max(0.0, float(budget)), core._fetch_history_adjusted, core._call_tool,
-                                         price_lookup=core.get_cmp, model=model)
+    # The wide scan (250+ stocks) is shared by everyone and cached; this only personalises it. A first scan takes minutes.
+    try:
+        scan = await asyncio.wait_for(core._scan_universe(model, scan_size), 75)
+    except asyncio.TimeoutError:
+        return {"status": "scan_in_progress", "progress": core._scan_progress.get(core._scan_key(model, scan_size), {}),
+                "note": "The wide scan of 250+ cash-market stocks is still running on the server. Ask again in a minute: once it finishes the result is kept for 15 minutes."}
+    return await recommend.recommend(url, existing, max(0.0, float(budget)), core._fetch_history_adjusted, core._call_tool,
+                                     price_lookup=core.get_cmp, model=model, scan_result=scan)
 
 
 async def live_quote(symbol: str) -> Any:

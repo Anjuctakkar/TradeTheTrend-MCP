@@ -330,6 +330,10 @@ The illustrated user guide is `static/TradeTheTrend-User-Manual.pdf`. It is serv
 
 Every table with four or more rows, in every tab, has a filter box under each column heading and click-to-sort headings, plus a row count and **Clear filters**. In a box, type text (contains), a comparison for numbers (`>5`, `<=-2`, `=3`), a range (`3..8`), several choices separated by commas (`TCS, INFY`), or start with `!` to exclude. Filters are kept when a tab refreshes itself (for example Live). Tick-all boxes only tick the rows left showing. Tables with fewer than four rows are left alone.
 
+## 10h. How Suggest stocks scans
+
+**Suggest stocks** has a **Stocks to scan** choice: the **30** most traded (fast) or the **250** most traded (wider; the default). The 250 option scans at least 250 cash-market stocks: the top names by traded value from the Bhavcopy server (`get_top_by_volume`, asked for 250), topped up from the sector lists if that tool returns fewer. History comes from the Bhavcopy server; each pick's current price, and today's change, come from the CM live feed. The scan is run once on the server and shared: every user's suggestions are personalised from the same scan (their holdings are excluded and their budget is split), and a finished scan is reused for 15 minutes (`SCAN_TTL`, in seconds), kept separately for the 30 and the 250 option. Only a stock with a split-sized price jump needs the extra corporate-action request, so a scan is about 500 NSE requests, a few minutes the first time and instant after that. The page shows progress while it runs. Settings: `SUGGEST_SCAN_SIZE` (at least 250), `SUGGEST_SCAN_CONCURRENCY` (default 6; NSE_MAX_INFLIGHT still caps requests at once). The assistant uses the same scan and says so if it is still running.
+
 ## 11. Troubleshooting
 
 | Symptom | Likely cause and fix |

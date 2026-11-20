@@ -526,3 +526,13 @@ def picks(loaded: dict[str, dict[str, Any]], cap: str = "all", tf: str = "weekly
         if len(final) >= limit:
             break
     return {"tf": tf, "cap": cap, "picks": final, "sectors_loaded": len(loaded), "candidates": len(cands), "rotation_warning": rot["warning"]}
+
+
+def catalogue_symbols() -> list[str]:
+    """Every stock in the sector lists, large caps first. Used to top up the suggestion scan when the top-by-value list is short."""
+    out: list[str] = []
+    for tier in TIERS:
+        for sector in load_sectors().values():
+            for tiers in sector.values():
+                out += tiers.get(tier, [])
+    return list(dict.fromkeys(out))

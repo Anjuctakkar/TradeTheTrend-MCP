@@ -65,7 +65,7 @@ def health():
     except Exception as exc:  # noqa: BLE001
         print(f"[health] database check failed: {type(exc).__name__}: {exc}", flush=True)
         raise HTTPException(503, "database unavailable")
-    return {"ok": True, "build": "sr-2026-10-16.16"}
+    return {"ok": True, "build": "sr-2026-10-16.18"}
 
 SERVERS: dict[str, str] = {
     "bhavcopy": os.getenv("NSE_BHAV_URL", "https://mcp.nseindia.in/bhavcopy/cm/mcp"),
@@ -114,6 +114,7 @@ class RecommendRequest(BaseModel):
     budget: float
     existing: list[dict[str, Any]] = []
     model: str = "trend"          # which rule set may produce picks: "trend", "sr" or "either"
+    scan_size: int = 250          # how many of the most-traded stocks to scan: 30 (fast) or 250 (wide)
 
 
 def _to_float(value: Any) -> Optional[float]:
@@ -999,6 +1000,95 @@ async def _fetch_history_adjusted(url: str, symbol: str, total_months: int, part
     return _adjust_records(records, ca["adjustments"])
 
 
+# ---------------------------------------------------------------------------
+# Suggest stocks: one wide scan (at least 250 cash-market stocks), shared and cached, then personalised per user
+# ---------------------------------------------------------------------------
+SCAN_TTL = float(os.getenv("SCAN_TTL", "900"))        # seconds a finished scan is reused (market data is the same for everyone)
+_scan_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_scan_tasks: dict[str, "asyncio.Task[dict[str, Any]]"] = {}
+_scan_progress: dict[str, dict[str, Any]] = {}
+_jobs: dict[str, dict[str, Any]] = {}
+
+
+async def _fetch_history_scan(url: str, symbol: str, months: int) -> list[dict[str, Any]]:
+    """History for the wide scan. Raw closes first (2 calls per stock); only a stock with a split-sized jump in its closes also
+    gets the corporate-action adjustment (1 more call), so a 250-stock scan costs about 500 requests instead of 750."""
+    records = await _fetch_history(url, symbol, months, partial_ok=True)
+    if not records:
+        return records
+    closes = [_to_float(r.get("close")) for r in records]
+    jump = any(a and b and (b / a - 1 <= -0.15 or b / a - 1 >= 0.25) for a, b in zip(closes, closes[1:]))
+    return await _fetch_history_adjusted(url, symbol, months, partial_ok=True) if jump else records
+
+
+def _scan_key(model: str, size: Any) -> str:
+    return f"{model}:{recommend.size_choice(size)}"            # the 30-stock and the wide scan are cached separately
+
+
+async def _scan_universe(model: str, size: Any = None) -> dict[str, Any]:
+    """The shared scan for one rule set and size: reused for SCAN_TTL; if one is already running, everyone waits for that one."""
+    size = recommend.size_choice(size) if size else recommend.SCAN_SIZE
+    key = _scan_key(model, size)
+    hit = _scan_cache.get(key)
+    if hit and time.time() - hit[0] < SCAN_TTL:
+        return hit[1]
+    task = _scan_tasks.get(key)
+    if task is None or task.done():
+        url = _server_url(ANALYSIS_SERVER)
+        _scan_progress[key] = {"done": 0, "total": 0, "phase": "starting"}
+
+        async def run() -> dict[str, Any]:
+            async with heavy_slot():
+                symbols, info, uni = await recommend.universe(url, _call_tool, sectors.catalogue_symbols(), size)
+                _scan_progress[key].update(total=len(symbols), phase="scanning")
+                result = await recommend.scan(url, symbols, info, _fetch_history_scan, model,
+                                              progress=lambda d, t: _scan_progress[key].update(done=d, total=t))
+            result["universe"] = uni
+            _scan_cache[key] = (time.time(), result)
+            _scan_progress[key]["phase"] = "done"
+            return result
+
+        task = _scan_tasks[key] = asyncio.create_task(run())
+    return await asyncio.shield(task)                  # a user who leaves does not cancel the scan for everyone else
+
+
+@app.post("/api/recommend/start")
+async def recommend_start(req: RecommendRequest, user: dict = Depends(auth.current_user)):
+    """Start a suggestion run and return a job id; the page polls /api/recommend/status (a scan takes minutes, too long for one request)."""
+    import uuid
+    if req.model not in recommend.MODELS:
+        raise HTTPException(400, f"model must be one of {list(recommend.MODELS)}.")
+    if user["id"] in _scanning:
+        raise HTTPException(409, "You already have a scan running. Wait for it to finish.")
+    for k in [k for k, j in _jobs.items() if time.time() - j["started"] > 1800]:
+        del _jobs[k]
+    job_id = uuid.uuid4().hex[:16]
+    _jobs[job_id] = {"user": user["id"], "key": _scan_key(req.model, req.scan_size), "started": time.time(), "state": "running", "result": None, "error": None}
+    _scanning.add(user["id"])
+
+    async def run() -> None:
+        job = _jobs[job_id]
+        try:
+            job["result"], job["state"] = await _recommend_inner(req, user), "done"
+        except HTTPException as exc:
+            job["error"], job["state"] = str(exc.detail), "error"
+        except Exception as exc:  # noqa: BLE001
+            job["error"], job["state"] = _describe_error(exc), "error"
+        finally:
+            _scanning.discard(user["id"])
+
+    asyncio.create_task(run())
+    return {"job": job_id}
+
+
+@app.get("/api/recommend/status")
+async def recommend_status(job: str, user: dict = Depends(auth.current_user)):
+    j = _jobs.get(job)
+    if j is None or j["user"] != user["id"]:
+        raise HTTPException(404, "That scan is no longer available. Start it again.")
+    return {"state": j["state"], "progress": _scan_progress.get(j["key"], {}), "result": j["result"] if j["state"] == "done" else None, "error": j["error"]}
+
+
 @app.post("/api/recommend")
 async def recommend_stocks(req: RecommendRequest, user: dict = Depends(auth.current_user)):
     """One scan per user at a time, and only NSE_HEAVY_JOBS across everyone: the rest wait their turn."""
@@ -1008,8 +1098,7 @@ async def recommend_stocks(req: RecommendRequest, user: dict = Depends(auth.curr
         raise HTTPException(409, "You already have a scan running. Wait for it to finish.")
     _scanning.add(user["id"])
     try:
-        async with heavy_slot():
-            return await _recommend_inner(req, user)
+        return await _recommend_inner(req, user)       # the shared scan takes its own heavy slot
     finally:
         _scanning.discard(user["id"])
 
@@ -1017,7 +1106,8 @@ async def recommend_stocks(req: RecommendRequest, user: dict = Depends(auth.curr
 async def _recommend_inner(req: RecommendRequest, user: dict):
     url = _server_url(ANALYSIS_SERVER)
     try:
-        result = await recommend.recommend(url, req.existing, req.budget, _fetch_history_adjusted, _call_tool, price_lookup=get_cmp, model=req.model)
+        scan = await _scan_universe(req.model, req.scan_size)
+        result = await recommend.recommend(url, req.existing, req.budget, _fetch_history_adjusted, _call_tool, price_lookup=get_cmp, model=req.model, scan_result=scan)
         sem = asyncio.Semaphore(ANALYSIS_CONCURRENCY)
 
         async def enrich(p: dict[str, Any]) -> None:
