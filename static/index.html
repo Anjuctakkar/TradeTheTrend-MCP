@@ -244,7 +244,7 @@
 <body>
 
 <div class="topbar">
-  <div class="brand" title="Back to the home page">TradeTheTrend<small>by EdgewithAI · S/R build 2026-10-16.18</small></div>
+  <div class="brand" title="Back to the home page">TradeTheTrend<small>by EdgewithAI · S/R build 2026-10-16.20</small></div>
   <nav class="tabs">
     <div class="tab active" data-view="home" style="display:none">Home</div>
     <div class="tab" data-view="analysis">Portfolio analysis</div>
@@ -304,6 +304,7 @@
 <details><summary>How do I filter or sort a table?</summary><p>Type in the small box under a column name. Numbers accept <b>&gt;5</b>, <b>&lt;=-2</b> and <b>3..8</b>; put a comma between choices (<b>TCS, INFY</b>); start with <b>!</b> to leave something out. Click a column name to sort and <b>Clear filters</b> to start over.</p></details>
 <details><summary>The page looks old or something is missing</summary><p>Press Ctrl+F5 to refresh fully. The build stamp next to the title and <code>/health</code> show which version the server is running. If the server was not restarted after an update, new features will not appear.</p></details>
 <details><summary>Settings says the Bhavcopy or CM server returned 404 or is not working</summary><p>The message now shows what NSE's server said. If it says <b>Session not found</b>, NSE's server did not recognise the session the app had just opened (this can happen when NSE runs several servers behind one address, or restarts one). The app now retries with a new session automatically. If it keeps failing, wait a few minutes and run <b>Test NSE connection</b> again, and try from your own computer to compare. Recently loaded data may still work from the cache for a while.</p></details>
+<details><summary>Do the suggestions get better over time?</summary><p>They can, and the app measures it instead of assuming it. Every setup a scan finds is logged, then checked against real prices. The app learns which conditions (such as RSI range, reward:risk, company size and the market's overall strength that day) worked, and only uses that to re-rank suggestions after it passes <b>two walk-forward tests on setups it has not seen</b>. If a later retrain stops passing, the plain rules take over again. It never changes entries, stops or targets, and it cannot promise better results: see <b>Evaluation &gt; How the suggestions are learning</b> for the evidence, including a live comparison of plain against learned picks.</p></details>
 <details><summary>Is any of this investment advice?</summary><p>No. Everything here is information from simple rules applied to past prices. Decisions are yours; consider speaking to a SEBI-registered adviser, and never use money you cannot afford to lose.</p></details>
     </div>
   </div>
@@ -342,6 +343,7 @@
       </div>
     </aside>
     <div class="main">
+      <details class="panel" id="learnDetails" style="margin-bottom:14px" open><summary style="cursor:pointer;font-weight:700;font-size:14px">How the suggestions are learning</summary><div id="learnPanel"><div class="hint">Loading…</div></div></details>
       <div id="trResults"><div class="empty">Loading…</div></div>
       <div id="btResults"></div>
     </div>
@@ -883,6 +885,19 @@ analyzeBtn.addEventListener("click", async () => {
 
 
 /* ---------- Suggestions (recommend.py) ---------- */
+let recCharts = [];
+/** The same full analysis Run analysis gives (charts, both rule sets, range, holding period, funding), for the suggested stocks. */
+async function analyzeSuggested(symbols, budget, model, box) {
+  recCharts.forEach(c => c.destroy());
+  recCharts.length = 0;
+  const syms = [...new Set(symbols)], per = syms.length ? budget / syms.length : 0;
+  const res = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+    stocks: syms.map(symbol => ({ symbol, allocation: per })), mode: "equal", total_capital: budget, max_weight_pct: 35, use_mtf: false, mtf_limit: null, signal_model: model === "sr" ? "sr" : "trend" }) });
+  const d = await res.json();
+  if (!res.ok) throw new Error(typeof d.detail === "string" ? d.detail : res.statusText);
+  renderAnalysis(d.results, d.mode, d.unallocated, d.funding, box, recCharts);
+  return d.results;
+}
 /** Starts a suggestion run on the server and polls it (the wide scan takes minutes, too long for one request). */
 async function recRun(body, st) {
   const start = await fetch("/api/recommend/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -912,6 +927,7 @@ function renderRecommendPanel() {
     <label>Stocks to scan</label>
     <label style="display:flex;align-items:center;gap:7px;margin:4px 0;color:var(--text);font-size:13px"><input type="radio" name="recSize" value="250" checked style="width:auto;margin:0"> 250 most traded <span class="hint" style="margin:0">(wider, a few minutes the first time)</span></label>
     <label style="display:flex;align-items:center;gap:7px;margin:4px 0;color:var(--text);font-size:13px"><input type="radio" name="recSize" value="30" style="width:auto;margin:0"> 30 most traded <span class="hint" style="margin:0">(faster)</span></label>
+    <label style="display:flex;align-items:center;gap:7px;margin:10px 0 4px;color:var(--text);font-size:13px"><input type="checkbox" class="recLearn" checked style="width:auto;margin:0"> Use what the app has learned <span class="hint" style="margin:0">(only once it has proven itself)</span></label>
     <div class="hint">${ok.length ? `Using your ${ok.length} analysed stock(s) to avoid overlap.` : "No analysed holdings yet, so correlation with your portfolio is skipped. Run an analysis first for a better ranking."}</div>
     <div class="hint">Scans the 250 or the 30 most-traded cash-market stocks you choose (end-of-day history from the Bhavcopy server, current price from the CM live feed) for LONG setups, ranks by rule score and low correlation with your holdings. The first scan takes a few minutes; a finished scan is shared and reused for 15 minutes. Mechanical screen only, not advice.</div>
     <button class="primary recBtn">Suggest stocks</button>
@@ -924,16 +940,16 @@ function renderRecommendPanel() {
     btn.disabled = true; st.className = "status recStatus"; st.textContent = "Starting the scan…"; out.innerHTML = "";
     try {
       const existing = ok.map(r => ({ symbol: r.symbol, dates: r.dates, close: r.close }));
-      const d = await recRun({ budget: parseFloat(panel.querySelector(".recBudget").value) || 0, existing, model: panel.querySelector(".recModel").value, scan_size: +panel.querySelector('input[name="recSize"]:checked').value }, st);
+      const d = await recRun({ budget: parseFloat(panel.querySelector(".recBudget").value) || 0, existing, model: panel.querySelector(".recModel").value, scan_size: +panel.querySelector('input[name="recSize"]:checked').value, use_learning: panel.querySelector(".recLearn").checked }, st);
       const u = d.universe || {};
-      st.textContent = `Scanned ${d.scanned} stocks (${u.top_by_value ?? 0} top by traded value${u.from_sector_lists ? ", " + u.from_sector_lists + " from the sector lists" : ""})${d.failed ? ", " + d.failed + " could not be loaded" : ""}: ${d.longs_found} long setup(s).` + (d.note ? " " + d.note : "") + (u.note ? " " + u.note : "");
+      st.textContent = `Scanned ${d.scanned} stocks (${u.top_by_value ?? 0} top by traded value${u.from_sector_lists ? ", " + u.from_sector_lists + " from the sector lists" : ""})${d.failed ? ", " + d.failed + " could not be loaded" : ""}: ${d.longs_found} long setup(s).` + (d.note ? " " + d.note : "") + (u.note ? " " + u.note : "") + (d.learning && d.learning.used ? ` Ranked by what the app has learned (version ${d.learning.version}${d.learning.avoided ? ", " + d.learning.avoided + " setup(s) left out on negative evidence" : ""}).` : " Ranked by the plain rules (what the app has learned is not in use yet: see Evaluation).");
       let savedIds = [];
       if ((d.skipped_by_price || []).length) st.textContent += " Skipped because the price has already moved: " + d.skipped_by_price.map(x => `${x.symbol} (${x.reason})`).join(", ") + ".";
       if (d.picks.length) {
         await evalReady;
         savedIds = evalStore.add(d.picks.map(p => ({ symbol: p.symbol, as_of: String(p.as_of).slice(0, 10), entry: p.entry, stop_loss: p.stop_loss, target: p.target, score: p.score, hold_days: p.hold_days ?? null, model: p.model, setup: p.setup })), "system").ids;
       }
-      if (d.picks.length) out.innerHTML = `<div class="panel"><h2>Suggested additions</h2><div class="result-scroll"><table><thead><tr><th>Symbol</th><th>Rule set</th><th>Score</th><th>RSI</th><th>Corr. to portfolio</th><th>Entry</th><th>CMP</th><th>Today</th><th>Stop</th><th>Target</th><th>Hold</th><th>52w low</th><th>52w high</th><th>Qty</th><th>Invested</th></tr></thead><tbody>${d.picks.map(p => `<tr><td>${escapeHtml(p.symbol)}</td><td>${modelBadge(p)}</td><td>${p.score}</td><td>${p.rsi}</td><td>${p.correlation ?? "—"}</td><td>₹${p.entry}</td><td>${p.cmp != null ? "₹" + p.cmp + (p.cmp_source === "live" ? ' <span class="badge target">live</span>' : p.cmp_source === "eod" ? ' <span class="badge expired" title="Live price unavailable">EOD</span>' : "") : "—"}</td><td>${p.cmp_change_pct != null ? pct(p.cmp_change_pct) : "—"}</td><td>₹${p.stop_loss}</td><td>₹${p.target}</td><td>${holdShort(p.hold)}</td><td>${p.week52?.status === "ok" ? fmtMoney(p.week52.low) : "—"}</td><td>${p.week52?.status === "ok" ? fmtMoney(p.week52.high) : "—"}</td><td>${p.quantity}</td><td>₹${p.invested.toLocaleString("en-IN")}</td></tr>`).join("")}</tbody></table></div><details class="trades"><summary>Why these holding periods</summary>${d.picks.map(p => `<div style="margin:8px 0"><b>${escapeHtml(p.symbol)}</b>: ${p.hold?.status === "proposed" ? "about " + p.hold.days + " trading days" : "none proposed"}<ul class="signal-reasons">${(p.hold?.reasoning || []).map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul></div>`).join("")}</details><button class="linkish btPicks" style="width:auto;padding:8px 14px">Backtest these picks</button><div class="hint">Quantity and invested use the current market price (CMP), and setups already past their stop or target at that price are skipped. These are saved to your Evaluation list as System picks, on this computer and not on the server, so you can check how they play out.</div></div>`;
+      if (d.picks.length) out.innerHTML = `<div class="panel"><h2>Suggested additions</h2><div class="result-scroll"><table><thead><tr><th>Symbol</th><th>Rule set</th><th>Score</th><th>RSI</th><th>Corr. to portfolio</th><th>Entry</th><th>CMP</th><th>Today</th><th title="Expected net return learned from past setups found in the same conditions, and how many such setups it rests on">Learned edge</th><th>Stop</th><th>Target</th><th>Hold</th><th>52w low</th><th>52w high</th><th>Qty</th><th>Invested</th></tr></thead><tbody>${d.picks.map(p => `<tr><td>${escapeHtml(p.symbol)}</td><td>${modelBadge(p)}</td><td>${p.score}</td><td>${p.rsi}</td><td>${p.correlation ?? "—"}</td><td>₹${p.entry}</td><td>${p.cmp != null ? "₹" + p.cmp + (p.cmp_source === "live" ? ' <span class="badge target">live</span>' : p.cmp_source === "eod" ? ' <span class="badge expired" title="Live price unavailable">EOD</span>' : "") : "—"}</td><td>${p.cmp_change_pct != null ? pct(p.cmp_change_pct) : "—"}</td><td>${p.learned_edge != null ? pct(p.learned_edge) + ' <span class="hint" style="margin:0">n=' + p.learned_n + "</span>" : "—"}</td><td>₹${p.stop_loss}</td><td>₹${p.target}</td><td>${holdShort(p.hold)}</td><td>${p.week52?.status === "ok" ? fmtMoney(p.week52.low) : "—"}</td><td>${p.week52?.status === "ok" ? fmtMoney(p.week52.high) : "—"}</td><td>${p.quantity}</td><td>₹${p.invested.toLocaleString("en-IN")}</td></tr>`).join("")}</tbody></table></div><details class="trades"><summary>Why these holding periods</summary>${d.picks.map(p => `<div style="margin:8px 0"><b>${escapeHtml(p.symbol)}</b>: ${p.hold?.status === "proposed" ? "about " + p.hold.days + " trading days" : "none proposed"}<ul class="signal-reasons">${(p.hold?.reasoning || []).map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul></div>`).join("")}</details><button class="linkish btPicks" style="width:auto;padding:8px 14px">Backtest these picks</button><div class="hint">Quantity and invested use the current market price (CMP), and setups already past their stop or target at that price are skipped. These are saved to your Evaluation list as System picks, on this computer and not on the server, so you can check how they play out.</div></div>`;
       out.querySelector(".btPicks")?.addEventListener("click", () => {
         evalSelected.clear();
         savedIds.forEach(id => evalSelected.add(id));
@@ -941,6 +957,23 @@ function renderRecommendPanel() {
         document.querySelector('.tab[data-view="eval"]').click();
         loadEvalList().then(runBacktest);
       });
+      if (d.picks.length) {
+        const n = d.picks.length, plural = n > 1 ? "s" : "";
+        const goEval = '<button type="button" class="linkish" id="recGoEval" style="width:auto;padding:5px 12px;margin:0 0 0 8px">Open Evaluation</button>';
+        const note = extra => `<div id="recEvalMsg" class="result-msg ok" style="margin:10px 0"><b>${n} suggested stock${plural} added to your Evaluation list</b> as System picks (kept on this computer)${extra || ""}.${goEval}</div>`;
+        const wire = () => document.getElementById("recGoEval").addEventListener("click", () => { document.querySelector('.tab[data-view="eval"]').click(); loadEvalList(); });
+        out.insertAdjacentHTML("beforeend", note("") + '<h2 style="margin:14px 0 8px">Analysis of the suggested stocks</h2><div id="recAnalysis"><div class="empty">Analysing the suggested stocks…</div></div>');
+        wire();
+        const abox = document.getElementById("recAnalysis");
+        try {
+          const results = await analyzeSuggested(d.picks.map(p => p.symbol), parseFloat(panel.querySelector(".recBudget").value) || 0, d.model, abox);
+          await evalReady;
+          const r = evalStore.add(evalItemsFor(results, new Set(d.picks.map(p => p.symbol))), "system");
+          r.ids.forEach(id => evalSelected.add(id));
+          document.getElementById("recEvalMsg").outerHTML = note(`: ${r.added} new entr${r.added === 1 ? "y" : "ies"} from the analysis, ${r.already} already there (one entry per rule set that shows a LONG setup)`);
+          wire();
+        } catch (e) { abox.innerHTML = `<div class="hint warn">Couldn't analyse the suggested stocks: ${escapeHtml(e.message)}</div>`; }
+      }
     } catch (e) { st.textContent = "Failed: " + e.message; st.className = "status recStatus error"; }
     finally { btn.disabled = false; }
   });
@@ -1124,7 +1157,7 @@ function renderSignal(sig, r) {
   </div>`;
 }
 
-function renderAnalysis(results, mode, unallocated, fsum) {
+function renderAnalysis(results, mode, unallocated, fsum, target = anResults, charts = chartInstances) {
   const ok = results.filter(r => !r.error);
   const totalAlloc = results.reduce((s, r) => s + (r.allocation || 0), 0);
   const totalInvested = ok.reduce((s, r) => s + (r.invested || 0), 0);
@@ -1157,7 +1190,7 @@ function renderAnalysis(results, mode, unallocated, fsum) {
   </table></div></div>`;
 
   html += `<div class="hint" style="margin-bottom:16px">Signals are a simple rule-based heuristic (SMA trend + MACD + RSI zone) for informational purposes only — not investment advice or a recommendation. Long setups only; it defaults to No trade when the checks don't line up. Data via NSE MCP is for informational and educational use.</div>`;
-  anResults.innerHTML = html;
+  target.innerHTML = html;
 
   ok.forEach(r => {
     const card = document.createElement("div");
@@ -1172,11 +1205,11 @@ function renderAnalysis(results, mode, unallocated, fsum) {
       ${renderCostBox(r)}
       <div class="chart-wrap"><canvas></canvas></div>
       <div class="chart-wrap small"><canvas></canvas></div>`;
-    anResults.appendChild(card);
+    target.appendChild(card);
 
     const [priceCanvas, rsiCanvas] = card.querySelectorAll("canvas");
 
-    chartInstances.push(new Chart(priceCanvas, {
+    charts.push(new Chart(priceCanvas, {
       type: "line",
       data: {
         labels: r.dates,
@@ -1198,7 +1231,7 @@ function renderAnalysis(results, mode, unallocated, fsum) {
       },
     }));
 
-    chartInstances.push(new Chart(rsiCanvas, {
+    charts.push(new Chart(rsiCanvas, {
       type: "line",
       data: { labels: r.dates, datasets: [{ label: "RSI(14)", data: r.rsi, borderColor: "#c979e0", pointRadius: 0, borderWidth: 1.5, tension: 0.1 }] },
       options: {
@@ -1213,7 +1246,7 @@ function renderAnalysis(results, mode, unallocated, fsum) {
   });
 
   if (!ok.length) {
-    anResults.innerHTML += '<div class="empty">No stock came back with usable data — check the errors in the summary table above.</div>';
+    target.innerHTML += '<div class="empty">No stock came back with usable data — check the errors in the summary table above.</div>';
   }
 }
 
@@ -1232,10 +1265,9 @@ document.getElementById("btRun").addEventListener("click", () => runBacktest());
 document.getElementById("trRefresh").addEventListener("click", () => refreshOutcomes());
 document.querySelector('.tab[data-view="eval"]').addEventListener("click", () => loadEvalList());
 
-async function addTickedToEvaluation(results, inputs) {
-  const ticked = new Set(inputs.filter(i => i.closest(".stock-wrap").querySelector(".stockEval").checked).map(i => i.dataset.resolved));
-  if (!ticked.size) return null;
-  const items = results.filter(r => !r.error && ticked.has(r.symbol)).flatMap(r => {
+/** Evaluation entries for analysed stocks: one per rule set that shows a LONG setup, or a watch-only entry if neither does. */
+function evalItemsFor(results, wanted) {
+  return results.filter(r => !r.error && wanted.has(r.symbol)).flatMap(r => {
     const as_of = String(r.ltp_date).slice(0, 10), out = [];
     const t = r.trade_signal || {}, q = r.sr_signal || {};
     if (t.signal === "LONG") out.push({ symbol: r.symbol, as_of, model: "trend", setup: t.setup || "trend_momentum", entry: t.entry, stop_loss: t.stop_loss, target: t.target, score: t.score,
@@ -1245,6 +1277,12 @@ async function addTickedToEvaluation(results, inputs) {
     if (!out.length) out.push({ symbol: r.symbol, as_of, model: "trend" });   // no LONG setup from either: watch-only
     return out;
   });
+}
+
+async function addTickedToEvaluation(results, inputs) {
+  const ticked = new Set(inputs.filter(i => i.closest(".stock-wrap").querySelector(".stockEval").checked).map(i => i.dataset.resolved));
+  if (!ticked.size) return null;
+  const items = evalItemsFor(results, ticked);
   const failed = ticked.size - new Set(items.map(i => i.symbol)).size;
   if (!items.length) return { added: 0, already: 0, failed };
   await evalReady;
@@ -2004,6 +2042,46 @@ document.querySelector('.tab[data-view="sectors"]').addEventListener("click", se
 document.getElementById("secEvery").addEventListener("change", secSchedule);
 document.getElementById("secRotLevel").addEventListener("change", secRotation);
 document.getElementById("secCap").addEventListener("change", async () => { try { await secRank(); } catch (e) {} renderSectors(); });
+
+/* ================= Learning: how the suggestions improve from their own outcomes ================= */
+const FEAT_LABEL = { setup: "Setup type", score: "Rule score", rr: "Reward:risk", risk: "Stop distance", rsi: "RSI", cap: "Company size", liq: "Liquidity rank", regime: "Market regime" };
+let learnTimer = null;
+async function learnRun() {
+  const b = document.getElementById("learnRun");
+  if (b) b.disabled = true;
+  try { await fetch("/api/learning/run", { method: "POST" }); } catch (e) {}
+  setTimeout(loadLearning, 1500);
+}
+async function loadLearning() {
+  const box = document.getElementById("learnPanel");
+  if (!box) return;
+  clearTimeout(learnTimer);
+  let d;
+  try { const res = await fetch("/api/learning/status"); d = await res.json(); if (!res.ok) throw new Error(typeof d.detail === "string" ? d.detail : res.statusText); }
+  catch (e) { box.innerHTML = `<div class="hint warn">Couldn't load: ${escapeHtml(e.message)}</div>`; return; }
+  const c = d.counts, m = d.model, v = m && m.validation, ab = d.live_comparison;
+  const cards = [["Setups logged", c.logged], ["Resolved", c.resolved], ["Still open", c.open], ["Replayed from history", c.backfilled], ["Live, resolved", c.live_resolved]];
+  let html = `<div class="summary-cards compact" style="margin:8px 0">${cards.map(([l, n]) => `<div class="summary-card"><div class="label">${l}</div><div class="value">${n}</div></div>`).join("")}</div>
+    <p class="hint" style="margin:0 0 8px">Every LONG setup a scan finds is logged with the conditions it was found in, then checked against real prices (target, stop or time limit). The app learns which conditions worked, but only uses that to re-rank suggestions after it passes <b>two walk-forward tests on setups it has not seen</b>. It never changes entries, stops or targets, and it cannot promise better results. Information only, not investment advice.</p>`;
+  if (!m) html += `<div class="result-msg">No calibration yet. ${d.running ? "The first run is in progress." : "It runs after a suggestion scan."} Needs ${d.thresholds.min_total} resolved setups before it can be tested.</div>`;
+  else html += `<div class="result-msg ${m.adopted ? "ok" : ""}"><b>${m.adopted ? "In use" : "Not in use"}</b> · version ${m.version}, trained on ${m.n} resolved setups${d.last_run ? ", last run " + escapeHtml(d.last_run) : ""}.<br>${escapeHtml(m.reason || "")}${!m.adopted && d.needed > 0 ? ` It needs ${d.needed} more resolved setups before it can be tested.` : ""}</div>`;
+  if (v && v.folds) html += `<h2 style="margin:12px 0 6px">The two tests on unseen setups</h2><div class="result-scroll"><table class="compact"><thead><tr><th>Test</th><th class="r">Unseen setups</th><th>Dates</th><th class="r">All setups</th><th class="r">Learned top third</th><th class="r">Learned bottom third</th><th class="r">Lift</th><th class="r">Shuffle p</th><th>Result</th></tr></thead><tbody>${
+      v.folds.map((f, i) => `<tr><td>Test ${i + 1}</td><td class="r">${f.n_valid}</td><td>${escapeHtml(f.valid_from || "")} to ${escapeHtml(f.valid_to || "")}</td><td class="r">${pct(f.baseline_mean)}</td><td class="r">${pct(f.top_mean)}</td><td class="r">${pct(f.bottom_mean)}</td><td class="r">${pct(f.lift)}</td><td class="r">${f.p_value}</td><td><span class="badge ${f.pass ? "target" : "expired"}">${f.pass ? "passed" : "not passed"}</span></td></tr>`).join("")}</tbody></table></div>
+      <div class="hint">Passing needs the top third to beat the average by at least ${d.thresholds.min_lift}% and the bottom third, with a shuffle-test p of ${d.thresholds.max_p} or less, in both tests. The overall average is ${m.overall.mean >= 0 ? "+" : ""}${m.overall.mean}% net per setup, ${m.overall.win_pct}% winners.</div>`;
+  const cond = rows => `<div class="result-scroll"><table class="compact"><thead><tr><th>Condition</th><th>Group</th><th class="r">Setups</th><th class="r">Avg return</th><th class="r">Winners</th><th class="r">Lift vs overall</th></tr></thead><tbody>${
+    rows.map(r => `<tr><td>${FEAT_LABEL[r.feature] || escapeHtml(r.feature)}</td><td>${escapeHtml(r.bucket)}</td><td class="r">${r.n}</td><td class="r">${pct(r.mean)}</td><td class="r">${r.win_pct}%</td><td class="r">${pct(r.lift)}</td></tr>`).join("")}</tbody></table></div>`;
+  if (m && (m.best.length || m.worst.length)) html += `<h2 style="margin:12px 0 6px">What it has found so far</h2><div class="hint" style="margin:0 0 4px">Groups with at least 15 setups. A group's average is pulled toward the overall average, so a small group claims little.</div>${m.best.length ? "<b style='font-size:12.5px'>Worked best</b>" + cond(m.best) : ""}${m.worst.length ? "<b style='font-size:12.5px'>Worked worst</b>" + cond(m.worst) : ""}`;
+  html += `<h2 style="margin:12px 0 6px">Is it helping? Live results</h2>` + (ab.days
+    ? `<div class="result-msg ${ab.diff > 0 ? "ok" : ""}">Over ${ab.days} scan days since a learned ranking was in use: the plain rules' top 5 averaged ${pct(ab.plain_avg)} (${ab.plain_win}% winners, ${ab.plain_n} setups); the learned top 5 averaged ${pct(ab.learned_avg)} (${ab.learned_win}% winners, ${ab.learned_n} setups). Difference ${pct(ab.diff)}. Small samples are noisy: judge it over many days.</div>`
+    : `<div class="hint">${escapeHtml(ab.note || "No live comparison yet.")}</div>`);
+  if (d.error) html += `<div class="hint warn">Last run problem: ${escapeHtml(d.error)}</div>`;
+  if (d.admin) html += `<div class="btnrow"><button class="secondary" id="learnRun" ${d.running ? "disabled" : ""}>${d.running ? "Learning is running…" : "Run learning now"}</button></div>`;
+  box.innerHTML = html;
+  const rb = document.getElementById("learnRun");
+  if (rb) rb.addEventListener("click", learnRun);
+  if (d.running) learnTimer = setTimeout(loadLearning, 4000);
+}
+document.querySelector('.tab[data-view="eval"]').addEventListener("click", loadLearning);
 
 /* ================= Home: nine cards that open the tabs, and a Home button on every other page ================= */
 const goHome = () => document.querySelector('.tab[data-view="home"]').click();

@@ -44,6 +44,7 @@ import backtest
 import db
 import funding
 import holding
+import learning
 import nse_cache
 import recommend
 import sectors
@@ -65,7 +66,7 @@ def health():
     except Exception as exc:  # noqa: BLE001
         print(f"[health] database check failed: {type(exc).__name__}: {exc}", flush=True)
         raise HTTPException(503, "database unavailable")
-    return {"ok": True, "build": "sr-2026-10-16.18"}
+    return {"ok": True, "build": "sr-2026-10-16.20"}
 
 SERVERS: dict[str, str] = {
     "bhavcopy": os.getenv("NSE_BHAV_URL", "https://mcp.nseindia.in/bhavcopy/cm/mcp"),
@@ -115,6 +116,7 @@ class RecommendRequest(BaseModel):
     existing: list[dict[str, Any]] = []
     model: str = "trend"          # which rule set may produce picks: "trend", "sr" or "either"
     scan_size: int = 250          # how many of the most-traded stocks to scan: 30 (fast) or 250 (wide)
+    use_learning: bool = True     # rank by what the app has learned, when that has been proven on unseen setups
 
 
 def _to_float(value: Any) -> Optional[float]:
@@ -1042,14 +1044,147 @@ async def _scan_universe(model: str, size: Any = None) -> dict[str, Any]:
                 symbols, info, uni = await recommend.universe(url, _call_tool, sectors.catalogue_symbols(), size)
                 _scan_progress[key].update(total=len(symbols), phase="scanning")
                 result = await recommend.scan(url, symbols, info, _fetch_history_scan, model,
-                                              progress=lambda d, t: _scan_progress[key].update(done=d, total=t))
+                                              progress=lambda d, t: _scan_progress[key].update(done=d, total=t), tiers=sectors.tier_by_symbol())
             result["universe"] = uni
+            result["symbols"], result["ranks"] = symbols, {s: i.get("rank") for s, i in info.items()}
             _scan_cache[key] = (time.time(), result)
             _scan_progress[key]["phase"] = "done"
+            try:                                            # learning must never get in the way of a suggestion
+                await asyncio.to_thread(learning.log_rows, learning.rows_from_scan(result, await _learned_in_force()))
+                asyncio.create_task(_learning_cycle())
+            except Exception as exc:  # noqa: BLE001
+                print(f"[learning] could not log the scan: {type(exc).__name__}: {exc}", flush=True)
             return result
 
         task = _scan_tasks[key] = asyncio.create_task(run())
     return await asyncio.shield(task)                  # a user who leaves does not cancel the scan for everyone else
+
+
+# ---------------------------------------------------------------------------
+# Learning loop (see learning.py): log every scan's setups, check outcomes against later prices, retrain, adopt only if proven
+# ---------------------------------------------------------------------------
+LEARN_EVERY = float(os.getenv("LEARN_EVERY_HOURS", "6")) * 3600       # least time between learning runs
+_learn: dict[str, Any] = {"newest": None, "loaded": False, "last_run": 0.0, "running": False, "last_error": None, "backfilled": 0}
+
+
+async def _learned_in_force() -> Optional[dict[str, Any]]:
+    """The newest calibration, but only if it passed its tests: if the latest retrain failed, the plain rules rank until one passes."""
+    if not _learn["loaded"]:
+        try:
+            _learn["newest"] = (await asyncio.to_thread(learning.latest_models))[0]
+        except Exception as exc:  # noqa: BLE001 - learning must never break suggestions
+            print(f"[learning] could not load the model: {type(exc).__name__}: {exc}", flush=True)
+        _learn["loaded"] = True
+    n = _learn["newest"]
+    return n if n and n.get("adopted") else None
+
+
+async def _learning_backfill() -> int:
+    """Once: replay both rule sets over each scanned stock's recent history so learning can start before live outcomes arrive."""
+    scans = sorted(_scan_cache.values(), key=lambda v: -v[0])
+    if not scans or not scans[0][1].get("symbols"):
+        return 0
+    res, tiers, url, total, sem = scans[0][1], sectors.tier_by_symbol(), _server_url(ANALYSIS_SERVER), [0], asyncio.Semaphore(3)
+
+    async def one(sym: str) -> None:
+        try:
+            async with sem:
+                recs = await _fetch_history_scan(url, sym, 6)
+            rows = await asyncio.to_thread(learning.backfill_rows, sym, recs, tiers.get(sym), (res.get("ranks") or {}).get(sym)) if recs else []
+            if rows:
+                added = await asyncio.to_thread(learning.log_rows, rows)
+                total[0] += added          # (not `+= await ...`, which would lose counts when stocks finish together)
+        except Exception:  # noqa: BLE001 - one stock failing is fine
+            pass
+
+    async with heavy_slot():
+        await asyncio.gather(*(one(s) for s in res["symbols"]))
+    return total[0]
+
+
+async def _learning_cycle(force: bool = False) -> None:
+    """Resolve open setups against real prices, backfill once, retrain, store the result as the next version."""
+    if _learn["running"] or (not force and time.time() - _learn["last_run"] < LEARN_EVERY):
+        return
+    _learn["running"] = True
+    try:
+        url = _server_url(ANALYSIS_SERVER)
+        open_rows = await asyncio.to_thread(learning.fetch_rows, True, False)
+        by_symbol: dict[str, list[dict[str, Any]]] = {}
+        for r in open_rows:
+            by_symbol.setdefault(r["symbol"], []).append(r)
+        histories: dict[str, list[dict[str, Any]]] = {}
+        sem = asyncio.Semaphore(3)
+
+        async def hist(sym: str, rs: list[dict[str, Any]]) -> None:
+            oldest = min(dt.date.fromisoformat(str(r["as_of"])[:10]) for r in rs)
+            async with sem:
+                try:
+                    histories[sym] = await _fetch_history_adjusted(url, sym, max(1, min(6, (dt.date.today() - oldest).days // 30 + 2)), partial_ok=True)
+                except Exception:  # noqa: BLE001
+                    pass
+
+        await asyncio.gather(*(hist(s, rs) for s, rs in by_symbol.items()))
+        await asyncio.to_thread(learning.update_outcomes, learning.resolve(open_rows, histories))
+        if (await asyncio.to_thread(learning.counts))["backfilled"] == 0:
+            _learn["backfilled"] = await _learning_backfill()
+        rows = await asyncio.to_thread(learning.fetch_rows, False, True)
+        payload = await asyncio.to_thread(learning.train, rows)
+        payload["version"] = await asyncio.to_thread(learning.save_model, payload)
+        _learn.update(newest=payload, loaded=True, last_error=None)
+    except Exception as exc:  # noqa: BLE001
+        _learn["last_error"] = f"{type(exc).__name__}: {exc}"
+        print(f"[learning] run failed: {_learn['last_error']}", flush=True)
+    finally:
+        _learn["last_run"] = time.time()
+        _learn["running"] = False
+
+
+async def _learning_status() -> dict[str, Any]:
+    await _learned_in_force()
+    counts = await asyncio.to_thread(learning.counts)
+    resolved = await asyncio.to_thread(learning.fetch_rows, False, True)
+    n = _learn["newest"]
+    table = learning.bucket_table(n["model"]) if n else []
+    model = None
+    if n:
+        model = {"version": n.get("version"), "created": n.get("created"), "n": n.get("n"), "adopted": bool(n.get("adopted")), "reason": n.get("reason"),
+                 "validation": n.get("validation"), "best": [r for r in table if r["lift"] > 0][:6], "worst": [r for r in reversed(table) if r["lift"] < 0][:6],
+                 "overall": {"mean": round(n["model"]["mu0"], 2), "win_pct": round(100 * n["model"]["win0"])}}
+    return {"counts": counts, "model": model, "live_comparison": learning.ab_compare(resolved), "running": _learn["running"], "error": _learn["last_error"],
+            "last_run": dt.datetime.fromtimestamp(_learn["last_run"], IST).strftime("%d %b %H:%M") if _learn["last_run"] else None,
+            "needed": max(0, learning.MIN_TOTAL - counts["resolved"]), "thresholds": {"min_total": learning.MIN_TOTAL, "min_lift": learning.MIN_LIFT, "max_p": learning.MAX_P}}
+
+
+@app.get("/api/learning/status")
+async def learning_status(user: dict = Depends(auth.current_user)):
+    """How the suggestions are learning: setups logged and resolved, the current calibration and its tests, and the live plain-vs-learned comparison."""
+    try:
+        return {**await _learning_status(), "admin": user["role"] == "admin"}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, f"Learning status failed: {type(exc).__name__}: {exc}")
+
+
+@app.post("/api/learning/run")
+async def learning_run(user: dict = Depends(auth.require_admin)):
+    """Run a learning cycle now (admin). It can take minutes the first time (backfill); the page polls the status."""
+    if _learn["running"]:
+        return {"started": False, "note": "Already running."}
+    asyncio.create_task(_learning_cycle(force=True))
+    return {"started": True}
+
+
+@app.on_event("startup")
+async def _learning_ticker() -> None:
+    async def loop() -> None:
+        await asyncio.sleep(180)
+        while True:
+            try:
+                await _learning_cycle()
+            except Exception:  # noqa: BLE001
+                pass
+            await asyncio.sleep(3600)
+    asyncio.create_task(loop())
 
 
 @app.post("/api/recommend/start")
@@ -1107,7 +1242,8 @@ async def _recommend_inner(req: RecommendRequest, user: dict):
     url = _server_url(ANALYSIS_SERVER)
     try:
         scan = await _scan_universe(req.model, req.scan_size)
-        result = await recommend.recommend(url, req.existing, req.budget, _fetch_history_adjusted, _call_tool, price_lookup=get_cmp, model=req.model, scan_result=scan)
+        result = await recommend.recommend(url, req.existing, req.budget, _fetch_history_adjusted, _call_tool, price_lookup=get_cmp, model=req.model, scan_result=scan,
+                                           learned=(await _learned_in_force()) if req.use_learning else None)
         sem = asyncio.Semaphore(ANALYSIS_CONCURRENCY)
 
         async def enrich(p: dict[str, Any]) -> None:

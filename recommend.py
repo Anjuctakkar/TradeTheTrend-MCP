@@ -20,6 +20,7 @@ import os
 from typing import Any, Awaitable, Callable, Optional
 
 import backtest
+import learning
 import sr_model
 import technical
 
@@ -111,7 +112,7 @@ async def universe(url: str, call_tool: Callable[..., Awaitable[Any]], extra: An
                 if len(order) >= size:
                     break
                 if sym and sym not in info:
-                    info[sym] = {"source": "top_by_value", "traded_value": _traded_value(r)}
+                    info[sym] = {"source": "top_by_value", "traded_value": _traded_value(r), "rank": len(order)}
                     order.append(sym)
     except Exception as exc:  # noqa: BLE001 - fall back to the sector lists
         note = f"The top-by-traded-value list failed ({type(exc).__name__})."
@@ -121,19 +122,21 @@ async def universe(url: str, call_tool: Callable[..., Awaitable[Any]], extra: An
             break
         sym = str(sym).strip().upper()
         if sym and sym not in info:
-            info[sym] = {"source": "sector_lists"}
+            info[sym] = {"source": "sector_lists", "rank": len(order)}
             order.append(sym)
     if n_top < size and not note:
         note = f"The top-by-traded-value list returned {n_top}; the rest came from the sector lists."
     return order, info, {"top_by_value": n_top, "from_sector_lists": len(order) - n_top, "total": len(order), "size": size, "note": note}
 
 
-def _evaluate(sym: str, recs: list[dict[str, Any]], model: str) -> Optional[dict[str, Any]]:
-    """One stock: the LONG setup from the chosen rule set(s), with its levels and daily returns, or None."""
+def _evaluate(sym: str, recs: list[dict[str, Any]], model: str) -> tuple[Optional[dict[str, Any]], Optional[bool]]:
+    """One stock: (its LONG setup from the chosen rule set(s) with levels and daily returns, or None; whether it is above its 50-day average)."""
     dates = [str(r.get("date", "")) for r in recs]
     closes = [technical_float(r.get("close")) for r in recs]
     macd_l, macd_s = technical.macd(closes)
     s20, s50, rsi = technical.sma(closes, 20), technical.sma(closes, 50), technical.rsi(closes, 14)
+    l50, last = technical.latest_value(s50), technical.latest_value(closes)
+    above50 = None if l50 is None or last is None else last > l50
     found: list[tuple[str, dict[str, Any]]] = []
     if model in ("trend", "either"):
         t_sig = technical.generate_trade_signal(closes, s20, s50, rsi, macd_l, macd_s)
@@ -145,18 +148,18 @@ def _evaluate(sym: str, recs: list[dict[str, Any]], model: str) -> Optional[dict
         if s_sig.get("signal") == "LONG":
             found.append(("sr", s_sig))
     if not found:
-        return None
+        return None, above50
     used, sig = max(found, key=lambda f: (int(f[1]["score"][0]), f[0] == "trend"))     # higher score wins; trend wins a tie
     return {"symbol": sym, "as_of": dates[-1][:10], "score": sig["score"], "entry": sig["entry"], "stop_loss": sig["stop_loss"],
             "target": sig["target"], "rsi": round(technical.latest_value(rsi) or 0, 1), "model": used,
-            "setup": sig.get("setup", "trend_momentum"), "returns": _returns(dates, closes)}
+            "setup": sig.get("setup", "trend_momentum"), "returns": _returns(dates, closes)}, above50
 
 
 async def scan(url: str, symbols: list[str], info: dict[str, dict[str, Any]], fetch_history: Callable[..., Awaitable[list[dict[str, Any]]]],
-               model: str = "trend", progress: Optional[Callable[[int, int], None]] = None) -> dict[str, Any]:
+               model: str = "trend", progress: Optional[Callable[[int, int], None]] = None, tiers: Optional[dict[str, str]] = None) -> dict[str, Any]:
     """Run every symbol through the rule set(s). progress(done, total) is called as stocks finish."""
     sem = asyncio.Semaphore(CONCURRENCY)
-    total, state = len(symbols), {"done": 0, "failed": 0}
+    total, state = len(symbols), {"done": 0, "failed": 0, "above": []}
 
     async def one(sym: str) -> Optional[dict[str, Any]]:
         recs = None
@@ -165,14 +168,16 @@ async def scan(url: str, symbols: list[str], info: dict[str, dict[str, Any]], fe
                 recs = await fetch_history(url, sym, HISTORY_MONTHS)
         except Exception:  # noqa: BLE001 - one bad symbol must not stop the scan
             state["failed"] += 1
-        out = None
+        out, above = None, None
         if recs:
             try:
-                out = _evaluate(sym, recs, model)
+                out, above = _evaluate(sym, recs, model)
             except Exception:  # noqa: BLE001
                 state["failed"] += 1
         elif recs is not None:
             state["failed"] += 1
+        if above is not None:
+            state["above"].append(above)
         state["done"] += 1
         if progress:
             progress(state["done"], total)
@@ -180,9 +185,12 @@ async def scan(url: str, symbols: list[str], info: dict[str, dict[str, Any]], fe
 
     results = await asyncio.gather(*(one(s) for s in symbols))
     longs = [r for r in results if r]
+    ab = state["above"]
+    regime = round(100 * sum(ab) / len(ab)) if ab else None          # market regime: % of scanned stocks above their 50-day average
     for r in longs:
         r.update({k: v for k, v in info.get(r["symbol"], {}).items()})
-    return {"model": model, "scanned": total, "evaluated": total - state["failed"], "failed": state["failed"], "longs": longs,
+        r["features"] = learning.features_for(r, regime, (tiers or {}).get(r["symbol"]))
+    return {"model": model, "regime": regime, "scanned": total, "evaluated": total - state["failed"], "failed": state["failed"], "longs": longs,
             "scanned_at": dt.datetime.now().isoformat(timespec="seconds")}
 
 
@@ -197,6 +205,7 @@ async def recommend(
     scan_result: Optional[dict[str, Any]] = None,
     extra_symbols: Any = (),
     scan_size: Optional[int] = None,
+    learned: Optional[dict[str, Any]] = None,
     progress: Optional[Callable[[int, int], None]] = None,
 ) -> dict[str, Any]:
     """Personalise a scan (passed in, or run now). price_lookup(symbol, eod_close, eod_date) -> {cmp, source, as_of, ...} supplies the
@@ -217,8 +226,23 @@ async def recommend(
             continue
         corr = _corr(l["returns"], port_ret) if port_ret else None
         longs.append({**{k: v for k, v in l.items() if k != "returns"}, "correlation": None if corr is None else round(corr, 2)})
-    # Higher score first, then lowest correlation with the current portfolio.
-    longs.sort(key=lambda e: (-int(e["score"][0]), 2 if e["correlation"] is None else e["correlation"]))
+    avoided = 0
+    if learned and learned.get("model"):
+        # A calibration that proved itself on unseen setups: rank by learned edge, and leave out setups the evidence says to avoid.
+        kept = []
+        for l in longs:
+            sc = learning.score(learned["model"], l.get("features") or {})
+            if sc:
+                l["learned_edge"], l["learned_n"], l["learned_win_prob"] = sc["edge"], sc["n"], sc["win_prob"]
+                if sc["edge"] < learning.AVOID_EDGE and sc["n"] >= learning.AVOID_MIN_N:
+                    avoided += 1
+                    continue
+            kept.append(l)
+        longs = kept
+        longs.sort(key=lambda e: (-e.get("learned_edge", 0.0), -int(e["score"][0]), 2 if e["correlation"] is None else e["correlation"]))
+    else:
+        # Higher score first, then lowest correlation with the current portfolio.
+        longs.sort(key=lambda e: (-int(e["score"][0]), 2 if e["correlation"] is None else e["correlation"]))
     skipped: list[dict[str, Any]] = []
     if price_lookup is None:
         picks = longs[:MAX_PICKS]
@@ -245,4 +269,5 @@ async def recommend(
         p["invested"] = round(p["quantity"] * buy, 2)
     return {"budget": budget, "scanned": scan_result["scanned"], "evaluated": scan_result.get("evaluated"), "failed": scan_result.get("failed", 0),
             "longs_found": len(longs), "picks": picks, "skipped_by_price": skipped, "model": model,
-            "universe": scan_result.get("universe"), "scanned_at": scan_result.get("scanned_at")}
+            "universe": scan_result.get("universe"), "scanned_at": scan_result.get("scanned_at"), "regime": scan_result.get("regime"),
+            "learning": ({"used": True, "version": learned.get("version"), "avoided": avoided, "reason": learned.get("reason")} if learned and learned.get("model") else {"used": False})}

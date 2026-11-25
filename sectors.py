@@ -536,3 +536,14 @@ def catalogue_symbols() -> list[str]:
             for tiers in sector.values():
                 out += tiers.get(tier, [])
     return list(dict.fromkeys(out))
+
+
+def tier_by_symbol() -> dict[str, str]:
+    """{symbol: large | mid | small} from the sector lists (the first tier a stock appears in)."""
+    out: dict[str, str] = {}
+    for tier in TIERS:
+        for sector in load_sectors().values():
+            for tiers in sector.values():
+                for sym in tiers.get(tier, []):
+                    out.setdefault(sym, tier)
+    return out

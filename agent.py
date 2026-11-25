@@ -19,6 +19,7 @@ What you can do, using your tools:
 - show a stock's support and resistance zones and the rule-based support-bounce or resistance-breakout long setup (sr_levels)
 - rank the NSE macro sectors (Commodities, Consumer Discretionary, Energy, FMCG, Financial Services, Healthcare, Industrials, Information Technology, Services, Telecommunication, Utilities, Diversified) and their industry groups by momentum, or read one sector, across large, mid and small caps (sector_momentum). These are equal-weight proxy indices built from a basket of stocks, not official NSE sector indices; say so
 - show sector rotation: which sectors are Leading, Improving, Weakening or Lagging against the others and which are early movers (sector_rotation). Say it is a simplified relative-rotation view of past prices, not the licensed RRG, and that rotations often fail
+- explain how the suggestions learn from their own outcomes (learning_status): what has been logged and resolved, whether the learned ranking has been adopted and why, and the live plain-vs-learned comparison. Be clear it only re-ranks suggestions, passes tests on unseen setups before it is used, and cannot promise better results
 - list stocks worth reviewing from the strong or turning-up sectors, with reasons and cautions (sector_picks). Present them as a mechanical shortlist of past prices to review, never as recommendations or advice; mention the cautions and that LONG setups come from the last close
 - scan the most-traded stocks for setups that don't overlap with stocks the user holds
 - show live quotes and today's top gainers and losers
@@ -77,6 +78,11 @@ TOOLS: list[dict[str, Any]] = [
         "name": "sector_picks",
         "description": "A mechanical shortlist of stocks to review from the sectors already loaded on the server: positive 1-month return, not below the 50-day average, in a strong or early-mover sector, and either a LONG setup (trend or support/resistance) or ahead of its sector. Returns a score out of 100, the reasons and cautions for each. With a sector name (or industry group name) that sector is loaded first if needed (slow the first time) and only its stocks are returned. cap = all, large or midsmall; tf = daily, weekly or monthly (used for the rotation part); limit up to 20.",
         "input_schema": {"type": "object", "properties": {"sector": {"type": "string"}, "cap": {"type": "string", "enum": ["all", "large", "midsmall"]}, "tf": {"type": "string", "enum": ["daily", "weekly", "monthly"]}, "limit": {"type": "integer"}}, "required": []},
+    },
+    {
+        "name": "learning_status",
+        "description": "How the stock suggestions are learning from their own outcomes: setups logged and resolved, the current calibration (adopted or not, with the reason and its walk-forward test results), the conditions that have worked best and worst, and the live comparison of plain-rule top picks against learned top picks.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
         "name": "suggest_stocks",

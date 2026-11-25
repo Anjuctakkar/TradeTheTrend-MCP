@@ -191,6 +191,18 @@ async def sector_picks(sector: str = "", cap: str = "all", tf: str = "weekly", l
                      "no sectors loaded means an empty list: ask the user to open the Sectors tab and click Load sectors, or name a sector.")}
 
 
+async def learning_status() -> dict[str, Any]:
+    """How the suggestions are learning from their own outcomes (counts, the current calibration and its tests, plain vs learned results)."""
+    d = await core._learning_status()
+    m = d.get("model") or {}
+    return {"logged": d["counts"], "adopted": m.get("adopted", False), "reason": m.get("reason") or "No calibration has been trained yet.",
+            "version": m.get("version"), "validation": (m.get("validation") or {}).get("lift") and {k: m["validation"][k] for k in ("n_valid", "baseline_mean", "top_mean", "bottom_mean", "lift", "p_value")},
+            "best_conditions": m.get("best"), "worst_conditions": m.get("worst"), "live_comparison": d["live_comparison"],
+            "needed_more_resolved": d["needed"], "last_run": d["last_run"],
+            "note": "Learning only re-ranks the suggestions (and drops setups with clearly negative evidence); it never changes entries, stops or targets. "
+                    "It is adopted only after passing two walk-forward tests on unseen setups. It cannot promise better results."}
+
+
 async def sr_levels(symbol: str) -> dict[str, Any]:
     """Support/resistance zones and the rule-based support/resistance setup for one stock."""
     sym = _sym(symbol)
@@ -209,7 +221,7 @@ async def sr_levels(symbol: str) -> dict[str, Any]:
 HANDLERS = {
     "search_symbol": search_symbol, "analyze_stock": analyze_stock, "backtest_stock": backtest_stock,
     "suggest_stocks": suggest_stocks, "live_quote": live_quote, "market_movers": market_movers,
-    "sr_levels": sr_levels, "sector_momentum": sector_momentum, "sector_rotation": sector_rotation, "sector_picks": sector_picks,
+    "sr_levels": sr_levels, "learning_status": learning_status, "sector_momentum": sector_momentum, "sector_rotation": sector_rotation, "sector_picks": sector_picks,
 }
 
 

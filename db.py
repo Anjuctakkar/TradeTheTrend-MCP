@@ -97,6 +97,43 @@ class NseCacheEntry(Base):
     stale_until: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), index=True)
 
 
+class SuggestionLog(Base):
+    """Every LONG setup a scan found, with the conditions it was found in and, later, how it turned out (see learning.py)."""
+    __tablename__ = "suggestion_log"
+    __table_args__ = (UniqueConstraint("symbol", "as_of", "model", "setup", "source", name="uq_suggestion"), Index("ix_suggestion_status", "status"))
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    symbol: Mapped[str] = mapped_column(String(20))
+    as_of: Mapped[str] = mapped_column(String(10), index=True)
+    model: Mapped[str] = mapped_column(String(10))                       # "trend" or "sr"
+    setup: Mapped[str] = mapped_column(String(30))
+    score: Mapped[str] = mapped_column(String(8))
+    entry: Mapped[float] = mapped_column(Float)
+    stop_loss: Mapped[float] = mapped_column(Float)
+    target: Mapped[float] = mapped_column(Float)
+    features: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    source: Mapped[str] = mapped_column(String(10))                      # "scan" (live) or "backfill" (replayed history)
+    status: Mapped[str] = mapped_column(String(10), default="open")      # open, target, stopped, expired
+    return_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    bars: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    exit_date: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    rank_baseline: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    rank_learned: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    model_version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+
+class LearnedModel(Base):
+    """Each trained calibration, whether or not it was adopted, so what was in force when is always known."""
+    __tablename__ = "learned_models"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    version: Mapped[int] = mapped_column(Integer, unique=True, index=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    adopted: Mapped[bool] = mapped_column(Boolean, default=False)
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
 def init_db() -> None:
     """Create missing tables. Two instances booting for the first time at once can race; the retry covers it.
     Replace with Alembic migrations when a table's columns need to change."""
